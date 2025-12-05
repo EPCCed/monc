@@ -1,0 +1,8 @@
+module restore
+module load cray-hdf5-parallel
+module load cray-parallel-netcdf
+module load cray-netcdf-hdf5parallel
+module load petsc
+
+module load atp
+export ATP_ENABLED=1

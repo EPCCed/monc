@@ -1,0 +1,665 @@
+# Essential components - do not change default setting
+# unless you know what you are doing. These have to be on 
+# for MONC to run
+
+
+clearsourceterms_enabled=.true.
+decomposition_enabled=.true.
+grid_manager_enabled=.true.
+halo_swapper_enabled=.true.
+model_synopsis_enabled=.true.
+stepfields_enabled=.true.
+stepping_direction_enabled=.true.
+swap_smooth_enabled=.true.
+termination_check_enabled=.true.
+
+# Component enable configuration
+
+buoyancy_enabled=.true.
+cfltest_enabled=.true.
+checkpointer_enabled=.true.
+coriolis_enabled=.false.
+damping_enabled=.false.
+debugger_enabled=.false.
+diagnostics_3d_enabled=.false.
+diffusion_enabled=.true.
+diverr_enabled=.true.
+fftsolver_enabled=.true.
+vert_filter_enabled=.false.
+filter_enabled=.false.
+flux_budget_enabled=.false.
+forcing_enabled=.false.
+iobridge_enabled=.false.
+iterativesolver_enabled=.false.
+iterativesolver_single_prec_enabled=.false.
+kidreader_enabled=.false.
+lower_bc_enabled=.false.
+mean_profiles_enabled=.false.
+petsc_solver_enabled=.false.
+physicsa_enabled=.false.
+profile_diagnostics_enabled=.false.
+psrce_enabled=.true.
+pstep_enabled=.true.
+pw_advection_enabled=.true.
+scalar_diagnostics_enabled=.false.
+set_consistent_lowbc_enabled=.true.
+setfluxlook_enabled=.true.
+simplecloud_enabled=.false. 
+simplesetup_enabled=.false.
+smagorinsky_enabled=.false.
+subgrid_profile_diagnostics_enabled=.false.
+socrates_couple_enabled=.false.
+th_advection_enabled=.false.
+tvd_advection_enabled=.true.
+viscosity_enabled=.true.
+randomnoise_enabled=.false. 
+casim_enabled=.false.
+casim_profile_dgs_enabled=.false.
+lwrad_exponential_enabled=.false. 
+lateral_bcs_enabled=.false.
+immersed_boundary_enabled=.false.
+ib_finalise_enabled=.false.
+conditional_diagnostics_column_enabled=.false.
+conditional_diagnostics_whole_enabled=.false.
+pdf_analysis_enabled=.false.
+tracers_enabled=.false.
+trajectories_enabled=.false.
+radioactive_tracers_enabled=.false.
+
+# Default disable the test case components (individual user config will enable these)
+bubble_enabled=.false.
+drybl_enabled=.false.
+kidtestcase_enabled=.false.
+shallow_convection_enabled=.false.
+
+
+# Component timestepping groups
+group_names= start, subgrid, dynamics, solver, pressure-terms, last
+
+start_group_type=entire
+subgrid_group_type=column
+dynamics_group_type=column
+solver_group_type=entire
+pressure-terms_group_type=column
+last_group_type=entire
+
+start_group_contents=clearsourceterms, stepping_direction, halo_swapper, lateral_bcs, setfluxlook
+subgrid_group_contents=lower_bc, smagorinsky
+dynamics_group_contents=kidtestcase, pw_advection, tvd_advection, th_advection, diffusion, viscosity, coriolis, buoyancy, damping, forcing, set_consistent_lowbc, socrates_couple, lwrad_exponential, simplecloud, casim, tracers, flux_budget, subgrid_profile_diagnostics, diverr, psrce, diagnostics_3d, profile_diagnostics, casim_profile_dgs, scalar_diagnostics, immersed_boundary, ib_finalise, vert_filter, stepfields
+
+solver_group_contents=pdf_analysis, mean_profiles, fftsolver, filter, iterativesolver, iterativesolver_single_prec, petsc_solver, cfltest
+pressure-terms_group_contents=pstep, swap_smooth, conditional_diagnostics_column
+last_group_contents=conditional_diagnostics_whole, checkpointer, model_synopsis, termination_check, iobridge
+
+# Component ordering for other stages
+
+initialisation_stage_ordering=decomposition, kidreader, kidtestcase, checkpointer, simplesetup, grid_manager, mean_profiles, swap_smooth, termination_check, simplecloud, casim, tracers, coriolis, buoyancy, cfltest, damping, diverr, fftsolver, filter, halo_swapper, iterativesolver, iterativesolver_single_prec, setfluxlook, lower_bc, physicsa, psrce, pw_advection, diffusion, set_consistent_lowbc, viscosity, smagorinsky, stepfields, stepping_direction, tvd_advection, model_synopsis, socrates_couple, lwrad_exponential, th_advection, randomnoise, forcing, immersed_boundary, ib_finalise, vert_filter, flux_budget, diagnostics_3d, profile_diagnostics, casim_profile_dgs, conditional_diagnostics_column, conditional_diagnostics_whole, pdf_analysis, subgrid_profile_diagnostics, scalar_diagnostics, lateral_bcs, petsc_solver, pstep, iobridge
+finalisation_stage_ordering=iobridge, checkpointer, diverr, fftsolver, filter, grid_manager, halo_swapper, iterativesolver, iterativesolver_single_prec, physicsa, psrce, smagorinsky, tvd_advection, socrates_couple, lwrad_exponential, model_synopsis, mean_profiles, pdf_analysis, forcing, immersed_boundary,  ib_finalise, vert_filter, stepfields, flux_budget, coriolis, buoyancy, diffusion, lower_bc, viscosity, profile_diagnostics, pw_advection, th_advection, damping, simplecloud, tracers, pstep, conditional_diagnostics_whole, conditional_diagnostics_column
+
+# Control configuration
+nn_timesteps=-1
+display_synopsis_frequency=10
+termination_time=1.0
+walltime_limit=none
+dtm=0.001
+nsmth=40
+logging=3  #INFO level logging
+check_msg_frequency=500
+check_walltime_frequency=200
+msg_filename=messages
+retain_model_time=.false.
+only_compute_on_sample_timestep=.false.
+force_output_on_interval=.false.
+l_constant_dtm=.false.
+
+# Debug assistance parameters
+print_debug_data=.false.         # Prints data for specific variables/point after each component 
+                                 #   call when .true.. Uses below coordinates to specify point.
+                                 #   When coordinate is negative, defaults to midpoint of dimension.
+pdd_x=-999                       # global grid x coordinate of print_debug_data grid point
+pdd_y=-999                       #   "     "   y   "          "              " 
+pdd_z=-999                       #   "     "   z   "          "              " 
+l_thoff=.false.                  # When .true., disables threading in the IOserver
+
+#Tracer configuration
+traj_interval=                   # name of config variable used to set 3d_tracers output_frequency
+                                 #   ensures trajectory reinitialization at data write time
+n_radioactive_tracers=0          # number of radioactive tracers
+tracer_decay_rate=0.0            # tracer decay rate for each n_radioactive_tracers [per hour]
+                                 #   default value causes no decay.
+tracer_surface_bc_option=0       # tracer surface BC option
+                                 # 0 = flux computed from decay rate.
+                                 # 1 = specified flux.
+                                 # 2 = specified value.                                   
+tracer_surface_bc=0.0            # tracer surface bc value.
+
+# CFL configuration
+cfl_frequency=10
+cfl_tollerance=0.1
+cfl_cvismax=0.2
+cfl_cvelmax=0.2
+cfl_dtmmax=100.
+cfl_dtmmin=0.0001
+cfl_rincmax=0.05
+cfl_monitor=.false.   # enable writing of cfl and dtm change information to stdout
+
+# Coriolis configuration
+baroclinicity_use_geostrophic_shear=.false.
+fcoriol=0.0
+geostrophic_wind_rate_of_change_in_x=0.0
+geostrophic_wind_rate_of_change_in_y=0.0
+surface_geostrophic_wind_x=0.0
+surface_geostrophic_wind_y=0.0
+rate_change_geostrophic_wind_x=0.0
+rate_change_geostrophic_wind_y=0.0
+
+# Damping configuration
+dmptim=0.0
+zdmp=0.0
+hdmp=0.0
+
+# Decomposition configuration
+decomposition_method = twodim
+
+# Checkpoint configuration
+checkpoint_frequency=10
+checkpoint_file="monc.nc"
+checkpoint_unique_per_dump=.false.
+
+# Internal write is a write from the checkpoint component:
+# always - Always do a write
+# never - Never do a write
+# auto - Default, do a write only if IO server is disabled
+checkpoint_internal_write=auto
+
+# Diagnostic flux configuration
+wmfcrit=0.0
+qlcrit=1.e-8
+
+# Iterative solver configuration
+tolerance=1.e-4
+max_iterations=500
+preconditioner_iterations=0
+include_top_level=.true.
+symm_prob=.false.
+solver_type=cg
+preconditioner_type=auto
+norm_type=auto
+
+# Lower BC configuration
+use_surface_boundary_conditions=.false.
+use_time_varying_surface_values=.false.  # When false, first surface value in input arrays is used
+max_change_buoyancy_flux=12.0
+
+type_of_surface_boundary_conditions=0    # PRESCRIBED_FLUX=0; PRESCRIBED_SURFACE_VALUE=1
+l_limit_surface_exchange=.false.         # Used only for PRESCRIBED_FLUX, considers dtmmin
+units_surface_temp=kelvin
+
+  # Surface data in file:
+surface_conditions_file=None       # If '' or None, file data used, below data values ignored
+
+  # Surface data in config:
+surface_boundary_input_times=      # unset real array
+surface_temperatures=              # unset real array
+surface_humidities=                # unset real array 
+                                   #    - This is meaningful.  When no values are provided,
+                                   #        the surface_vapour_mixing_ratio is calculated as
+                                   #        its saturated value.
+                                   #    - Expected units are mixing ratio [kg/kg] 
+surface_sensible_heat_flux=        # unset real array
+surface_latent_heat_flux=          # unset real array
+
+
+# Time-varying forcing --------------------------------------------------------------------------------------------
+# enter files as the base directory-relative path to file
+# specify the vertical coordinate of the forcing as 'height' [m] or 'pressure' [Pa]
+#  - expecting NetCDF variable names to be "wsubs", "theta_tendency", or "q_tendency" for
+#    subsidence, theta, and water vapour forcing time-height profiles, respectively.
+#  - expecting temporal coordinate variable/dimension to be called "time".
+#  - expecting wsubs as m/s
+#     - This is a subsidence velocity only, not divergence rate.
+#     - When using use_time_varying_subsidence=.true., subsidence_input_type is ignored.
+#  - expecting theta_tendency as K/s
+#     - Allowed to be temperature (instead of theta), but requires convert_input_theta_from_temperature=.true.
+#     - convert_input_theta_from_temperature will also apply to any additional constant forcing.
+#  - expecting q_tendecy as kg/kg/s
+use_time_varying_subsidence=.false.
+varying_subsidence_file=               # .nc file, DEFAULT: unset
+varying_subsidence_coordinate=         # 'height' [m] or 'pressure' [Pa]
+
+use_time_varying_theta=.false.
+varying_theta_file=                    # .nc file, DEFAULT: unset
+varying_theta_coordinate=              # 'height' [m] or 'pressure' [Pa]
+
+use_time_varying_q=.false.
+varying_q_file=                        # .nc file, DEFAULT: unset
+varying_q_coordinate=                  # 'height' [m] or 'pressure' [Pa]
+
+
+# Simplesetup options
+x_size=1
+y_size=1
+z_size=1
+dxx=1
+dyy=1
+kgd=10
+hgd=10.0
+zztop=1.0
+number_q_fields=0
+rhobous=1.0
+thref0=288.0
+surface_pressure=100000.0
+surface_reference_pressure=100000.0
+rmlmax=-1.0
+use_anelastic_equations=.false.
+origional_vertical_grid_setup=.true.
+passive_q=.true.
+passive_th=.true.
+enable_theta=.false.
+use_time_varying_surface_values=.false.
+use_saturated_surface=.true.
+calculate_th_and_q_init=.false.
+use_viscosity_and_diffusion=.true.
+galilean_transformation=.true.
+use_surface_fluxes=.true.
+backscatter=.false.
+halo_depth=2
+
+galilean_transformation=.false.
+fix_ugal=.false.
+fix_vgal=.false.
+
+
+# Initial profiles setup
+# User can use either absolute or potential temperature
+# but MONC uses potential, so conversion done in 
+# gridmanager component
+l_init_pl_theta=.false.
+l_init_pl_temp=.false.
+# units for potential or absolute temperature 
+# assumed to be kelvin
+units_temperature=kelvin
+l_init_pl_u=.false.
+l_init_pl_v=.false.
+l_init_pl_q=.false.
+# initial profile of relative humidity
+l_init_pl_rh=.false.
+
+l_matchthref=.false.
+l_thref=.false.
+
+# Smagorinsky configuration
+# Default values for the smagorinsky subgrid constants
+smag-subb=40.0
+smag-subc=16.0
+# The subgrid constant values for the 'conventional' subgrid model 
+# of Brown (1999)
+# smag-subb=1.43
+# smag-subc=1.43
+
+# Temporary switch to force the
+# LEM dissipation rate diagnostic. This should
+# be removed once Circle-A diagnostic development
+# complete and tested
+l_lem_dissipation_rate = .true.
+
+# Random noise setup
+l_rand_bit_reproducible=.true.
+l_rand_pl_theta=.false.
+l_rand_pl_q=.false.
+l_rand_pl_w=.false.
+
+# Subsidence profile
+l_subs_pl_theta=.false.
+l_subs_pl_q=.false.
+subsidence_input_type=1
+subsidence_local_theta=.true.
+subsidence_local_q=.true.
+
+forcing_file=None
+
+# Large-scale time-independent forcing
+l_constant_forcing_theta=.false.
+l_constant_forcing_q=.false.
+l_constant_forcing_u=.false.
+l_constant_forcing_v=.false.
+
+constant_forcing_type_theta=0
+constant_forcing_type_q=0
+constant_forcing_type_u=0
+constant_forcing_type_v=0
+
+forcing_timescale_theta=3600.
+forcing_timescale_q=3600.
+forcing_timescale_u=3600.
+forcing_timescale_v=3600.
+
+relax_to_initial_u_profile=.false.
+relax_to_initial_v_profile=.false.
+relax_to_initial_theta_profile=.false.
+
+convert_input_theta_from_temperature=.false.
+
+l_constant_forcing_theta_height=.true.  # Forcing in height coordinates (.true.) or pressure (.false.)
+
+units_u_force=m_per_second_per_day
+units_v_force=m_per_second_per_day
+units_theta_force=K_per_day
+
+# Advection configuration (options are any, pw or tvd)
+advection_flow_fields=any
+advection_theta_field=any
+advection_q_fields=any
+
+# Science constants
+von_karman_constant=0.4
+z0=2.0e-3
+z0th=2.0e-4
+alphah=1.0
+betam=4.8
+betah=7.8
+gammam=19.3
+gammah=12.0
+pi=3.14159
+cp=1005.0
+rlvap=2.501e6
+r=287.05
+G=9.81
+convective_limit=-0.5
+# Molecular weight of dry air/ molecular weight of water, 28.966/18.0153
+ratio_mol_wts=1.608
+rlargep=1.0e37
+surface_vapour_mixing_ratio=0.0
+
+# IO server configuration
+ioserver_configuration_file="io/description.xml"
+moncs_per_io_server=3
+enable_io_server=.true.
+
+# Kid reader configuration
+kid_configuration_file=""
+rhobous=1.0
+thref0=288.0
+surface_pressure=100000.0
+flood_q=.false.
+float_q=.false.
+clone_to_3d=.false.
+rotate_xy=.false.
+domain_multiplication=1
+q_coordinates_x=-1
+q_coordinates_y=-1
+q_coordinates_z=-1
+q_coordinates_value=1
+
+#Kid test case
+kid_test_case=-1
+kid_dim_size=-1,-1,-1
+kid_flow_value=-1,-1,-1
+kid_pheight=0.0,0.0,0.0
+kid_ptheta=0.0,0.0,0.0
+kid_pqv=0.0,0.0,0.0
+
+# Simple cloud
+max_height_cloud=20000.
+
+#tank experiments
+l_bubbles=.false.
+l_splittank=.false.
+l_sources=.false.
+l_bubble_straka=.false.
+bubble_lrandom=.false.
+tank_lmoist=.false.
+l_bubble_use_t=.false.
+
+barrier_x=0.
+barrier_y=0.
+front_tank_delta_theta=0. 
+back_tank_delta_theta=0.
+left_tank_delta_theta=0. 
+right_tank_delta_theta=0.
+front_tank_delta_rh=0. 
+back_tank_delta_rh=0.
+left_tank_delta_rh=0. 
+right_tank_delta_rh=0.
+
+# Radiation settings - variables and switches for exponential radiation (LWEXP) 
+longwave_exp_decay = 85.0 # longwave rad exponential decay factor
+cltop_longwave_flux = 70.0 # cloud top longwave flux (Wm-2)
+clbase_longwave_flux = 22.0 # cloud base longwave flux (Wm-2)
+
+### SOCRATES inputs
+# Add paths for the mcclatchey profiles
+mcc_temperature_profile  = None
+mcc_vapour_profile       = None
+mcc_ozone_profile        = None
+# Add options for rad_cntrl
+spectral_file_lw           = components/socrates_couple/data/spectra/ga7/sp_lw_ga7
+i_gas_overlap_lw           = 4
+i_water_lw              = 5
+# 11 = baran, 8 = aggregate for the above spectral file, dependent on iwc and temperature
+i_ice_lw                = 11
+i_scatter_method_lw        = 1
+
+spectral_file_sw           = components/socrates_couple/data/spectra/ga7/sp_sw_ga7
+i_gas_overlap_sw           = 4
+i_water_sw              = 5
+i_ice_sw                = 11
+
+# 5 is clear sky, 2 is cloud (ice and liquid no overlap), 1 (ice and liquid full overlap)
+i_cloud_representation  = 5
+
+## Time and location variables for socrates
+l_360 = .true.           #  360 days in year as opposed to 365 (a UM thing 
+                         #  in the LEM, is this still required??)     
+l_solar_fixed  = .false. # true equals fixed insolation using value in
+                         # sol_fixed
+l_no_solar     = .false. # Only use longwave rad by setting lit_fraction = 0.0
+default_solar_constant = 1361. # Default solar constant
+solar_fixed    = -999.0  # prescribed insolation value
+sec_fixed      = -999.0  # prescribed 1/cos(solar_zenith_angle)
+latitude       = -999.0  # latitude for the location of radiation calc
+longitude      = -999.0  # longitude for the location of radiation calc
+rad_start_year = -999.0  # simulation year for earth sun distance
+rad_start_day  = -999.0  # starting day of the year (0 is jan 1st, Dec 31st is 365, except leap obviously)
+rad_start_time = -999.0  # Start time for the radiation calc, hours after 0Z
+rad_interval   = -999    # Radiation calculation interval [integer]
+                         #  - If time_basis=.true., this is the time [ s ] between each radiation
+                         #    call.
+                         #  - If time_basis=.false., this is the number of timesteps [ ts ] 
+                         #    between each radiation call.
+                         #  - If .le. zero, radiation called every timestep, otherwise (gt than 0)
+		         #    radiation will be called less frequently
+
+## Surface albedo variables for socrates
+l_variable_srf_albedo = .false. # not coded yet but will allow variable
+                                  # surface albedo with solar zenith angle
+surface_albedo = -999 # surface albedo (fixed in time)
+
+# set the hydrometeors used in socrates
+# 0 is not used, 1 is used.
+# If a hydrometeor is selected, it must be available in the
+# chosen microphysics scheme otherwise the model will stop
+mphys_nq_l=0 # cloud liquid mass
+mphys_nd_l=0 # cloud drop number
+mphys_nq_r=0 # rain mass	
+mphys_nq_i=0 # ice mass
+mphys_nq_s=0 # snow mass
+mphys_nq_g=0 # graupel mass
+
+### configuration for effective radius calculation
+## Fixed cloud effective radius settings for socrates
+## NOTE: default is to set effective radius to fixed values (as in LEM)
+## NOTE: The cloud number parameter, fixed_cloud_number, is specified 
+##       in the 'CASIM switches' section below, ensuring consistency 
+##       with the microphysics.
+l_fix_re       = .true.
+fixed_cloud_re = 10.0 # effective radius for cloud droplets 10 microns
+fixed_ice_re   = 30.0 # effective radius for ice 30 microns
+# Use number of drops to derive re. Will not work is l_fix_re = .true
+l_use_ndrop    = .false.
+## Liu scheme, used in ESM
+l_use_liu_spec = .false.
+# Density of water, consistent with CASIM in mphys_parameters
+rho_water = 997.0
+# KPARAM_* is the ratio of the cubes of the volume-mean radius and the effective radius
+# used to calc effective radius, kparam = 0.67 for land (polluted) and 0.80 sea (clean) (martin 94)
+kparam = 0.80
+
+
+# CASIM switches =======================================================
+
+option          = 22222
+diag_mu_option  = -999
+iopt_act        = 3
+iopt_inuc       = 4
+process_level   = 0
+aerosol_option  = 2
+max_step_length = 120.0
+max_sed_length  = 2.0
+# Cloud number parameter is also used in the SOCRATES radiation and
+#   should be consistent with microphysics assumption.
+fixed_cloud_number = 50.0e6 # cloud number / m**3
+
+p1              = 3.0
+p2              = 0.0
+p3              = 6.0
+sp1             = 3.0
+sp2             = 1.5
+sp3             = 0.0
+max_mu          = 25.0
+fix_mu          = 2.5
+
+l_aaut          = .true.
+l_aacc          = .true.
+l_aevp          = .true.
+l_ased          = .true.
+l_warm          = .false.
+l_inuc          = .true.
+l_iaut          = .true.
+l_idep          = .true.
+l_iacw          = .true.
+l_active_inarg2000 = .false. 
+l_separate_rain = .false.
+l_sg            = .true.
+l_g             = .true.
+l_passive       = .false.
+l_passive3m     = .false.
+l_limit_psd     = .true.
+l_override_checks = .false.
+l_raci_g        = .true.
+l_onlycollect   = .false.
+l_abelshipway   = .true.
+l_cons          = .false. 
+l_rain          = .true.
+l_sed_3mdiff    = .false.
+l_sed_icecloud_as_1m = .false.
+l_inhom_revp    = .true.
+l_pcond         = .true.
+l_praut         = .true.
+l_pracw         = .true.
+l_pracr         = .true.
+l_prevp         = .true.
+l_psedl         = .true.
+l_psedr         = .true.
+l_ptidy         = .true.
+l_ptidy2        = .true.
+l_pinuc         = .true.
+l_pidep         = .true.
+l_piacw         = .true.
+l_psaut         = .true.
+l_psdep         = .true.
+l_psacw         = .true.
+l_pgdep         = .true.
+l_pseds         = .true.
+l_psedi         = .true.
+l_psedg         = .true.
+l_psaci         = .true.
+l_praci         = .true.
+l_psacr         = .true.
+l_pgacr         = .true.
+l_pgacw         = .true.
+l_pgaci         = .true.
+l_pgacs         = .true.
+l_piagg         = .false.
+l_psagg         = .true.
+l_pgagg         = .false.
+l_psbrk         = .true.
+l_pgshd         = .true.
+l_pihal         = .true.
+l_psmlt         = .true.
+l_pgmlt         = .true.
+l_phomr         = .true.
+l_phomc         = .true.
+l_pssub         = .true.
+l_pgsub         = .true.
+l_pisub         = .true.
+l_pimlt         = .true.
+l_gamma_online  = .false.
+l_subseds_maxv  = .false.
+l_sed_eulexp  = .false.
+cfl_vt_max = 1.0
+l_kfsm = .false.
+l_adjust_D0 = .true.
+
+l_tidy_conserve_E = .true.
+l_tidy_conserve_q = .true.
+
+# Conditional diagnostic defaults (all values)
+cond_request=ALL, BYu, BCu, NrBCu, AC, ACu, ACd, WG1, WL1, ALu, ALd, CLu, CLd, AH, AL, AI, PPd, VPd, PVd, MO, BM, AA, AV
+diag_request=area, W, W2, TH, WTH, THP, WTHP, THVP, WTHVP, THP2, WTHSG, W3, RH, U, V, WU, WV, WUSG, WVSG, TEMP, THL, THLP, THLP2, QVLI, QVLIP, QVLIP2, QRSG, QRSGP, QRSGP2, WQVLIP, WQRSGP
+# ctritical thv and up/downdraft thresholds
+thvprcrit=0.0
+wSupcrit=1.0
+wSdwncrit=-1.0
+wupcrit=0.0
+wdwncrit=0.0
+# critical ql, qi and q_hydrometeor for conditional sampling
+#qlcrit= 1.e-5 already defined above
+qicrit= 1.e-5
+qpptcrit= 1.e-5
+vpptcrit= 1.e-4
+# Diff calculations of thv; .false. means thv=th(1+0.61qv) and .true. mean thv=th(1+0.61qv-(ql+qi))
+thv_from_th_with_liqice=.true.
+
+# -----------------------------------------------------------------
+# Parameters used to compute vertical velocity critical thresholds
+# -----------------------------------------------------------------
+# used only when pdf_analysis_enabled=.true.
+# fractional percentiles:
+#    uppercrit=0.05 --> set updraft threshold at top 5% of w
+#    dwnpercrit=0.05 --> set downdraft threshold at bottom 5% of w
+show_critical_w=.false.
+uppercrit=0.05
+dwnpercrit=0.05
+
+# vertical velocity histogram parameters
+n_w_bins=50                        # number of bins (max-min)/bin_size (max determined by these parameters)
+w_bin_size=1.0                     # size of bin [m/s]
+w_bin_min=-25.0                    # lower bound of historgram [m/s]
+# -----------------------------------------------------------------
+
+# enable 3d binary SOCRATES-based total cloud mask diagnostic
+l_cloud_mask=.false.
+# cloud mask calculation method for cloud fraction diagnostics
+# options are [DEFAULT, SOCRATES]
+cloud_mask_method=DEFAULT
+# In calculating separate liquid and ice cloud fractions, we can
+# assume that coexisting liquid and ice cloud remain separate and 
+# have cell cloud fractions in proportion to their relative 
+# contribution to total cloud mass (.true.) 
+# or
+# if either exceeds the cloud threshold as determined by the
+# cloud_mask_method, the constituent has area 1.0. This is the
+# same as assuming homogeneous clouds.
+l_partial_liq_ice=.false.
+
+
+# Diagnostic sampling basis (unit selection)
+time_basis=.false.      # logical for sampling and output intervals [ .false. (timestep, DEFAULT) | .true. (time) ]
+
+#RCEMIP
+l_rcemip_initial=.false.
+l_rcemip_ozone=.false.
+l_rcemip_gases=.false.
+l_rcemip_lowerbc=.false.
+#l_rcemip_tracers=.false. # To implement, see ticket #376/349 for branch monc/main/branches/dev/toddjones/vn0.9.0_RCEMIP

@@ -1,0 +1,3 @@
+The meshgen utilities rely on ib_config.mcf as input.
+
+This could be manually modified to accept other configuration files.

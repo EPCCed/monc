@@ -1,0 +1,64 @@
+#!/bin/bash
+#SBATCH --job-name=add_jobname
+#SBATCH --output=add_pbs_dir%x.o%j
+#SBATCH --open-mode=append
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=128
+#SBATCH --ntasks=add_np
+#SBATCH --time=01:00:00
+#SBATCH --partition=standard
+#SBATCH --qos=taskfarm
+#SBATCH --account=add_account
+
+
+# Make sure any symbolic links are resolved to absolute path 
+export SLURM_SUBMIT_DIR=$(readlink -f $SLURM_SUBMIT_DIR)
+
+# Change to the directory that the job was submitted from 
+cd $SLURM_SUBMIT_DIR
+
+# MODULES
+. env/add_modules
+module load atp
+export ATP_ENABLED=1
+module list
+
+# Recommended ARCHER2 settings that may help with performance at very high node counts
+# Note, though that some problems have been observed when using these in testing,
+#   including steadily increasing time to complete a timestep before failing (ucx).
+#   https://docs.archer2.ac.uk/known-issues/
+# module unload craype-network-ofi
+# module unload cray-mpich
+# module load craype-network-ucx
+# module load cray-mpich-ucx
+# module load libfabric
+# export UCX_IB_REG_METHODS=direct  # (using ucx)
+
+# Recommended ARCHER2 Settings, https://docs.archer2.ac.uk/known-issues/
+export FI_MR_CACHE_MAX_COUNT=0   # (using libfabric)
+# Recommended ARCHER2 I/O Settings, https://docs.archer2.ac.uk/user-guide/io/#recommended-archer2-io-settings
+export FI_OFI_RXM_SAR_LIMIT=64K  # (using ofi for MPI)
+
+export SUBMISSION_SCRIPT_NAME=add_scriptname
+export MONC_EXEC=add_build_exec
+
+export TESTCASE=add_testcase_mcf
+export STDOUT_DIR=add_stdout_dirname
+export CP_DIR=add_checkpoint_dirname
+export RUN_NAME=add_testsuite_jobname
+export MAX_CONTINUATION_RUNS=200
+
+ulimit -c unlimited
+
+echo -e "\nSubmission time: $(date)\n"
+echo -e "Submitting from: $(pwd)\n"
+
+. test_harness/continuation.sh
+run_monc
+
+# Output job statistics
+echo -e "\nCompletion time: $(date)\n"
+scontrol show job $SLURM_JOB_ID
+sstat $SLURM_JOB_ID --format="AveRSS,MaxRSS"
+# For finished jobs:
+# sacct --format=JobID,AveCPU,AveRSS,MaxRSS,MaxRSSTask -j $SLURM_JOB_ID

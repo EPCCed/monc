@@ -1,0 +1,194 @@
+# Global configuration
+global_configuration=global_config
+
+# Override global component defaults
+coriolis_enabled=.true.
+fftsolver_enabled=.true.
+pw_advection_enabled=.true.
+tvd_advection_enabled=.true.
+simplesetup_enabled=.true.
+smagorinsky_enabled=.true.
+lower_bc_enabled=.true.
+setfluxlook_enabled=.true. #This must be set to true if running with lower_bc.
+damping_enabled=.true.
+mean_profiles_enabled=.true. #This must be set to true if running with damping
+randomnoise_enabled=.true.
+th_advection_enabled=.false.
+iobridge_enabled=.true.
+scalar_diagnostics_enabled=.true.
+profile_diagnostics_enabled=.true.
+#FFTE = .false.
+
+# Control configuration
+
+cfltest_enabled=.false.
+dtm=0.4
+
+# IO server configuration
+ioserver_configuration_file="io/io_cfg_files/data_write_1file.xml"
+moncs_per_io_server=8
+diagnostic_file="diagnostic_files/ibtest.nc"
+
+termination_time=1200.
+display_synopsis_frequency=100
+sampling_frequency=100
+3d_sampling_frequency=100
+mm=100.0
+mm1=100.0
+diag_write_freq=100.0
+
+# Checkpoint configuration
+checkpoint_frequency=0
+checkpoint_file="checkpoint_files/ibtest_dump.nc"
+checkpoint_walltime_frequency=300
+walltime_limit=03:00:00
+
+# Advection choices
+advection_flow_fields=pw
+advection_theta_field=pw
+advection_q_fields=tvd
+
+# CFL configuration
+cfl_frequency=10
+cfl_cvismax=0.4
+cfl_cvelmax=0.4
+cfl_dtmmax=0.5
+cfl_dtmmin=0.001
+
+# Simple setup configuration
+# We'll want to change this reference profile later
+thref0=300.0
+surface_pressure=100000.
+surface_reference_pressure=100000.
+x_size=64
+y_size=64
+z_size=120
+dxx=20.
+dyy=20.
+zztop=2000.0
+kgd=110, 120
+hgd=1100.0, 2000.0 
+nsmth=40
+galilean_transformation=.false.
+#rmlmax=15.0
+
+# Damping configuration
+dmptim=0.001
+zdmp=1800.0
+hdmp=200.0
+
+#Initialise fields
+#This initialisation is to setting u = ug0 (see LEM)
+l_init_pl_u=.true.
+l_init_pl_v=.false.
+l_init_pl_q=.false.
+z_init_pl_u=0.00, 2000.00
+f_init_pl_u= 6.0, 6.0 
+z_init_pl_v=0.00, 2000.00 
+f_init_pl_v=0.00, 0.00
+l_init_pl_theta=.true.
+z_init_pl_theta=0.,2000.
+f_init_pl_theta=300.0,300.0
+
+
+# Random noise
+l_rand_pl_w=.true.
+z_rand_pl_w=0.0, 250.0, 500.0, 1000.
+f_rand_pl_w=1.0, 1.5, 0.5, 0.0
+
+enable_theta=.true.
+number_q_fields=0
+use_anelastic_equations=.false.
+origional_vertical_grid_setup=.true.
+passive_th=.false.
+passive_q=.true.
+backscatter=.false.
+use_viscosity_and_diffusion=.true.
+  
+l_matchthref=.false.
+
+# physical constants
+z0=0.1
+z0th=0.1
+
+# Coriolis
+fcoriol=0.0001
+geostrophic_wind_rate_of_change_in_x=0.0
+geostrophic_wind_rate_of_change_in_y=0.0
+surface_geostrophic_wind_x=10.0
+surface_geostrophic_wind_y=0.0
+
+# surface flux config
+# type_of_surface_boundary_conditions=PRESCRIBED_FLUX=0
+use_surface_boundary_conditions=.true.
+use_time_varying_surface_values= .false.
+type_of_surface_boundary_conditions = 1 
+surface_latent_heat_flux   = 0.0
+surface_sensible_heat_flux = 30.0
+surface_temperatures = 302.0
+surface_humidities = 0.0
+
+# forcing
+forcing_enabled=.true. 
+l_constant_forcing_theta=.false.
+l_constant_forcing_q=.false.
+l_constant_forcing_u=.true.
+l_constant_forcing_v=.false.
+# TENDENCY=0, RELAXATION=1, INCREMENTS=2
+constant_forcing_type_theta=1
+constant_forcing_type_q=0
+constant_forcing_type_u=1
+constant_forcing_type_v=1
+
+relax_to_initial_u_profile=.false.
+relax_to_initial_v_profile=.false.
+relax_to_initial_theta_profile=.false.
+
+z_force_pl_u=0.00, 2000.00
+f_force_pl_u=10.00, 10.00 
+z_force_pl_v=0.00, 2000.00 
+f_force_pl_v=0.00, 0.00
+
+forcing_timescale_u=1800.
+forcing_timescale_v=1800.
+forcing_timescale_th=1800.
+
+# immersed boundary ---------------------------------------------------
+#
+immersed_boundary_enabled = .true.
+ib_finalise_enabled = .true.
+ib_input_file = mesh.nc
+# IB type (0= no slip, 1=velocity reconstruction)
+ib_type = 1
+
+
+# IB diagnostics
+ib_diags_enabled = .false.
+ib_dump_dir = "./ib_diagnostic_files"
+ib_dump_u = .true.
+ib_dump_v = .true.
+ib_dump_w = .true.
+ib_dump_th= .true.
+ib_dump_p = .true.
+ib_dump_ustar = .true.
+
+# vertical filter (simple 1-2-1)
+vert_filter_enabled = .true. 
+nfilt = 1 # number of filter iterations (for 121 filter)
+nvert = 1 # number of points above VR point to apply filter
+
+# horizontal filter (nth order low-pass Butterworth spectral with cut-off in grid units, dx)
+filter_enabled=.true.
+# filter settings
+f_prox = 1.5 #ib proximity length scale for filtering (units = max(dx,dy))
+f_order = 5.
+f_cutoff = 3.0
+f_kmax = -1 # max k index (-1 = top of model)
+
+u_filter_enabled=.true.
+v_filter_enabled=.true.
+w_filter_enabled=.true.
+th_filter_enabled=.true.
+p_filter_enabled=.true.
+
+

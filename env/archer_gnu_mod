@@ -1,0 +1,6 @@
+module restore
+module load PrgEnv-gnu
+module load gcc/11.2.0
+module load cray-hdf5-parallel
+module load cray-parallel-netcdf
+module load cray-netcdf-hdf5parallel
