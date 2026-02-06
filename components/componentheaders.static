@@ -44,6 +44,7 @@ use swapsmooth_mod, only : swapsmooth_get_descriptor
 use terminationcheck_mod, only : terminationcheck_get_descriptor
 use thadvection_mod, only : thadvection_get_descriptor
 use tvdadvection_mod, only : tvdadvection_get_descriptor
+use tvdadvectionompt_mod, only : tvdadvectionompt_get_descriptor
 use viscosity_mod, only : viscosity_get_descriptor
 use lwrad_exponential_mod, only : lwrad_exponential_get_descriptor
 use lateral_bcs_mod, only : lateral_bcs_get_descriptor
