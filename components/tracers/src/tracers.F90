@@ -150,16 +150,16 @@ contains
 
       ! Reset advection fields
       if (allocated(current_state%tracer(ixr)%flux_previous_y)) then
-        current_state%tracer(ixr)%flux_previous_y(:) = 0.0_DEFAULT_PRECISION
-        current_state%tracer(ixi)%flux_previous_y(:) = 0.0_DEFAULT_PRECISION
+        current_state%tracer(ixr)%flux_previous_y(:,:,:) = 0.0_DEFAULT_PRECISION
+        current_state%tracer(ixi)%flux_previous_y(:,:,:) = 0.0_DEFAULT_PRECISION
       end if
       if (allocated(current_state%tracer(ixr)%flux_y_buffer)) then
-        current_state%tracer(ixr)%flux_y_buffer(:) = 0.0_DEFAULT_PRECISION
-        current_state%tracer(ixi)%flux_y_buffer(:) = 0.0_DEFAULT_PRECISION
+        current_state%tracer(ixr)%flux_y_buffer(:,:,:) = 0.0_DEFAULT_PRECISION
+        current_state%tracer(ixi)%flux_y_buffer(:,:,:) = 0.0_DEFAULT_PRECISION
       end if
       if (allocated(current_state%tracer(ixr)%flux_previous_x)) then
-        current_state%tracer(ixr)%flux_previous_x(:,:) = 0.0_DEFAULT_PRECISION
-        current_state%tracer(ixi)%flux_previous_x(:,:) = 0.0_DEFAULT_PRECISION
+        current_state%tracer(ixr)%flux_previous_x(:,:,:) = 0.0_DEFAULT_PRECISION
+        current_state%tracer(ixi)%flux_previous_x(:,:,:) = 0.0_DEFAULT_PRECISION
       end if
 
     end if !tracer(ixr)%active

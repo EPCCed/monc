@@ -14,8 +14,8 @@ module prognostics_mod
     logical :: active = .false., halo_allocated=.false.
     integer, dimension(3) :: grid  !< The grid that this prognostic lives on per dimension
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: data !< The 3D data associated with this field
-    real(kind=DEFAULT_PRECISION), dimension(:), allocatable :: flux_previous_y, flux_y_buffer
-    real(kind=DEFAULT_PRECISION), dimension(:,:), allocatable :: flux_previous_x
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: flux_previous_y, flux_y_buffer
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: flux_previous_x
     integer :: async_flux_handle = MPI_REQUEST_NULL
   end type prognostic_field_type
 

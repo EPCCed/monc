@@ -74,11 +74,12 @@ shallow_convection_enabled=.false.
 
 
 # Component timestepping groups
-group_names= start, subgrid, dynamics, solver, pressure-terms, last
+group_names= start, subgrid, dynamics, dynamics-acc, solver, pressure-terms, last
 
 start_group_type=entire
 subgrid_group_type=column
 dynamics_group_type=column
+dynamics-acc_group_type=entire
 solver_group_type=entire
 pressure-terms_group_type=column
 last_group_type=entire
@@ -86,6 +87,8 @@ last_group_type=entire
 start_group_contents=clearsourceterms, stepping_direction, halo_swapper, lateral_bcs, setfluxlook
 subgrid_group_contents=lower_bc, smagorinsky
 dynamics_group_contents=kidtestcase, pw_advection, tvd_advection, th_advection, diffusion, viscosity, coriolis, buoyancy, damping, forcing, set_consistent_lowbc, socrates_couple, lwrad_exponential, simplecloud, casim, tracers, flux_budget, subgrid_profile_diagnostics, diverr, psrce, diagnostics_3d, profile_diagnostics, casim_profile_dgs, scalar_diagnostics, immersed_boundary, ib_finalise, vert_filter, stepfields
+
+dynamics-acc_group_contents=pw_advection_ompt, tvd_advection_ompt
 
 solver_group_contents=pdf_analysis, mean_profiles, fftsolver, filter, iterativesolver, iterativesolver_single_prec, petsc_solver, cfltest
 pressure-terms_group_contents=pstep, swap_smooth, conditional_diagnostics_column

@@ -27,8 +27,10 @@ module tvdadvectionompt_mod
   type(grid_stencil_type), save :: star_stencil
   integer, save :: u_index=0, v_index=0, w_index=0
   logical :: advect_flow, advect_th, advect_q, advect_tracer
-  real(kind=DEFAULT_PRECISION), dimension(:), allocatable :: flux_x, flux_y, flux_z, u_advection, v_advection, &
+  real(kind=DEFAULT_PRECISION), dimension(:), allocatable :: u_advection, v_advection, &
        w_advection
+
+  real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: flux_x, flux_y, flux_z
   real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: th_advection
   real(kind=DEFAULT_PRECISION), dimension(:,:,:,:), allocatable :: q_advection
   real(kind=DEFAULT_PRECISION), dimension(:,:), allocatable :: tracer_advection
@@ -338,9 +340,9 @@ contains
 #endif
 
     star_stencil = create_stencil(current_state%local_grid, fields, num_fields, 3, sizes, xdim, ydim)
-    allocate(flux_y(current_state%global_grid%size(Z_INDEX)))
-    allocate(flux_z(current_state%global_grid%size(Z_INDEX)))
-    allocate(flux_x(current_state%global_grid%size(Z_INDEX)))
+    allocate(flux_y(current_state%global_grid%size(Z_INDEX) + current_state%local_grid%halo_size(Z_INDEX) * 2, current_state%global_grid%size(Y_INDEX) + current_state%local_grid%halo_size(Y_INDEX) * 2, current_state%global_grid%size(X_INDEX) + current_state%local_grid%halo_size(X_INDEX) * 2))
+    allocate(flux_z(current_state%global_grid%size(Z_INDEX) + current_state%local_grid%halo_size(Z_INDEX) * 2, current_state%global_grid%size(Y_INDEX) + current_state%local_grid%halo_size(Y_INDEX) * 2, current_state%global_grid%size(X_INDEX) + current_state%local_grid%halo_size(X_INDEX) * 2))
+    allocate(flux_x(current_state%global_grid%size(Z_INDEX) + current_state%local_grid%halo_size(Z_INDEX) * 2, current_state%global_grid%size(Y_INDEX) + current_state%local_grid%halo_size(Y_INDEX) * 2, current_state%global_grid%size(X_INDEX) + current_state%local_grid%halo_size(X_INDEX) * 2))
     allocate(u_advection(current_state%global_grid%size(Z_INDEX)), v_advection(current_state%global_grid%size(Z_INDEX)), &
          w_advection(current_state%global_grid%size(Z_INDEX)), th_advection(current_state%global_grid%size(Z_INDEX),current_state%global_grid%size(Y_INDEX) + current_state%local_grid%halo_size(Y_INDEX) * 2,current_state%global_grid%size(X_INDEX) + current_state%local_grid%halo_size(X_INDEX) * 2), &
          tracer_advection(current_state%global_grid%size(Z_INDEX), current_state%n_tracers))
@@ -351,9 +353,9 @@ contains
     local_domain_end_index=current_state%local_grid%local_domain_end_index
 
     ! Initialise terms
-    flux_y(:) = 0.0_DEFAULT_PRECISION
-    flux_x(:) = 0.0_DEFAULT_PRECISION
-    flux_z(:) = 0.0_DEFAULT_PRECISION
+    flux_y(:,:,:) = 0.0_DEFAULT_PRECISION
+    flux_x(:,:,:) = 0.0_DEFAULT_PRECISION
+    flux_z(:,:,:) = 0.0_DEFAULT_PRECISION
 
     advect_flow=determine_if_advection_here(options_get_string(current_state%options_database, "advection_flow_fields"))    
     advect_th=determine_if_advection_here(options_get_string(current_state%options_database, "advection_theta_field"))
@@ -629,7 +631,7 @@ contains
        ! NOTE: flux_z is declared at the top of module and then passed into ultflx, through argument 
        !       list in advect_scalar_field.
        tvd_dgs_terms%adv_u_dgs(:, current_state%column_local_y, current_state%column_local_x) =  &
-            flux_z(:)
+            flux_z(:,current_state%column_local_y, current_state%column_local_x)
     endif
 #endif
 
@@ -641,7 +643,7 @@ contains
        ! NOTE: flux_z is declared at the top of module and then passed into ultflx, through argument 
        !       list in advect_scalar_field.
        tvd_dgs_terms%adv_v_dgs(:, current_state%column_local_y, current_state%column_local_x) =  &
-            flux_z(:)
+            flux_z(:,current_state%column_local_y, current_state%column_local_x)
     endif
 #endif
 
@@ -653,7 +655,7 @@ contains
        ! NOTE: flux_z is declared at the top of module and then passed into ultflx, through argument 
        !       list in advect_scalar_field.
        tvd_dgs_terms%adv_w_dgs(:, current_state%column_local_y, current_state%column_local_x) =  &
-            flux_z(:)
+            flux_z(:,current_state%column_local_y, current_state%column_local_x)
     endif
 #endif
   end subroutine advect_flow_fields
@@ -683,8 +685,9 @@ contains
       do i=1,current_state%number_q_fields
         if (current_state%q(i)%active) then   
           if (.not. allocated(q(i)%flux_previous_x)) allocate(q(i)%flux_previous_x(local_grid%size(Z_INDEX), &
-                  local_grid%size(Y_INDEX)+4))
-          if (.not. allocated(q(i)%flux_previous_y)) allocate(q(i)%flux_previous_y(local_grid%size(Z_INDEX)))
+                  local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
+          if (.not. allocated(q(i)%flux_previous_y)) allocate(q(i)%flux_previous_y(local_grid%size(Z_INDEX), &
+                  local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
         end if
       end do
 
@@ -692,13 +695,12 @@ contains
     profile_diagnostics_enabled = is_component_enabled(current_state%options_database, "profile_diagnostics")
 
 
-  !$OMP target enter data map(to: u,v, w, zq, q, sq, global_grid, local_grid, parallel)
-
-    !$OMP target teams distribute parallel do collapse(3)
-    do x = local_domain_start_index(X_INDEX)-1, local_domain_end_index(X_INDEX)
-      do y = local_domain_start_index(Y_INDEX)-1, local_domain_end_index(Y_INDEX)
-        do i=1,number_q_fields
-          if (q(i)%active) then           
+    !$OMP target enter data map(to: u,v, w, zq, q, sq, global_grid, local_grid, parallel)
+    do i=1,number_q_fields
+      if (q(i)%active) then  
+        !$OMP target teams distribute parallel do collapse(2)
+        do x = local_domain_start_index(X_INDEX)-1, local_domain_end_index(X_INDEX)
+          do y = local_domain_start_index(Y_INDEX)-1, local_domain_end_index(Y_INDEX)         
             call advect_scalar_field(y, x, dtm, u, &
                 v, w, zq(i), q(i), sq(i), &
                 global_grid, local_grid, parallel, &
@@ -708,16 +710,14 @@ contains
               ! NOTE: flux_z is declared at the top of module and then passed into ultflx, through argument 
               !       list in advect_scalar_field.
               tvd_dgs_terms%adv_q_dgs(:, y, x, i) =  &
-                    flux_z(:)
+                    flux_z(:, y, x)
             end if
-              
-          end if
-        end do
-      end do  
+
+          end do
+        end do  
+        !$OMP end target teams distribute parallel do
+      end if
     end do
-    !$OMP end target teams distribute parallel do
-
-
 
     do i=1,current_state%number_q_fields
           if (current_state%q(i)%active) q_advection(:,:,:,i)=current_state%sq(i)%data(:, :, :)
@@ -769,19 +769,20 @@ contains
 
     if (current_state%th%active) then
       if (.not. allocated(th%flux_previous_x)) allocate(th%flux_previous_x(local_grid%size(Z_INDEX), &
-              local_grid%size(Y_INDEX)+4))
-      if (.not. allocated(th%flux_previous_y)) allocate(th%flux_previous_y(local_grid%size(Z_INDEX)))
+              local_grid%size(Y_INDEX)+4,local_grid%size(X_INDEX)+4))
+      if (.not. allocated(th%flux_previous_y)) allocate(th%flux_previous_y(local_grid%size(Z_INDEX), &
+              local_grid%size(Y_INDEX)+4,local_grid%size(X_INDEX)+4))
 
       profile_diagnostics_enabled = is_component_enabled(current_state%options_database, "profile_diagnostics")
 
       !!call log_master_log(LOG_INFO, "Accelerating advection: flow fields")
 
-        CALL SYSTEM_CLOCK(COUNT=count_start)
-  CALL SYSTEM_CLOCK(COUNT_RATE=count_rate)
+      call SYSTEM_CLOCK(COUNT=count_start)
+      call SYSTEM_CLOCK(COUNT_RATE=count_rate)
 
-  !$OMP target enter data map(to: u,v, w, zth, th, sth, flux_y, flux_z, flux_x)
+      !$OMP target enter data map(to: u,v, w, zth, th, sth, flux_y, flux_z, flux_x)
 
-    CALL SYSTEM_CLOCK(COUNT=count_end_transfer_to)
+      call SYSTEM_CLOCK(COUNT=count_end_transfer_to)
 
       !$OMP target teams distribute parallel do collapse(2)
       do x = local_domain_start_index(X_INDEX)-1, local_domain_end_index(X_INDEX)
@@ -794,14 +795,14 @@ contains
               ! NOTE: flux_z is declared at the top of module and then passed into ultflx, through argument 
               !       list in advect_scalar_field.
             tvd_dgs_terms%adv_th_dgs(:, y, x) =  &
-                 flux_z(:)
+                 flux_z(:, y, x)
           endif
 
         end do  
       end do
       !$OMP end target teams distribute parallel do
 
-            CALL SYSTEM_CLOCK(COUNT=count_end)
+      call SYSTEM_CLOCK(COUNT=count_end)
       time_elapsed_gpu_transfer_to = REAL(count_end_transfer_to - count_start, KIND=8) / REAL(count_rate, KIND=8)
       time_elapsed_gpu_compute = REAL(count_end - count_end_transfer_to, KIND=8) / REAL(count_rate, KIND=8)
       call log_master_log(LOG_INFO, "Accelerating advection: theta, times: "//trim(conv_to_string(time_elapsed_gpu_transfer_to))//" "//trim(conv_to_string(time_elapsed_gpu_compute)))
@@ -811,7 +812,7 @@ contains
       do x = local_domain_start_index(X_INDEX)-1, local_domain_end_index(X_INDEX)
         do y = local_domain_start_index(Y_INDEX)-1, local_domain_end_index(Y_INDEX)
 
-          call differentiate_face_values_with_wrap_send_recv(y, x,u,&
+          call differentiate_face_values_with_wrap_send_recv(y, x, u,&
             v, w, th, sth, global_grid,&
             local_grid, parallel, halo_column)
         end do  
@@ -831,22 +832,22 @@ contains
     type(local_grid_type), intent(inout) :: local_grid
     type(parallel_state_type), intent(inout) :: parallel
 
-    call register_y_flux_wrap_recv_if_required(y_local_index, q_field, parallel, local_grid)
+    call register_y_flux_wrap_recv_if_required(y_local_index, x_local_index, q_field, parallel, local_grid)
 
-    call complete_y_flux_wrap_recv_if_required(y_local_index, q_field, parallel, local_grid)
+    call complete_y_flux_wrap_recv_if_required(y_local_index, x_local_index, q_field, parallel, local_grid)
 
     if (.not. halo_column) then
       call differentiate_face_values(y_local_index, x_local_index, u, v, w, y_local_index, x_local_index, source_field, &
-           local_grid, global_grid, q_field%flux_previous_y, q_field%flux_previous_x(:,y_local_index), &
+           local_grid, global_grid, q_field%flux_previous_y(:, y_local_index, x_local_index), q_field%flux_previous_x(:, y_local_index, x_local_index), &
           global_grid%configuration%vertical%tzc1, global_grid%configuration%vertical%tzc2, .true.)
     end if
 
-    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) q_field%flux_previous_y(:) = flux_y(:)
-    call register_y_flux_wrap_send_if_required(y_local_index, q_field, parallel, local_grid)
+    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) q_field%flux_previous_y(:,y_local_index, x_local_index) = flux_y(:,y_local_index, x_local_index)
+    call register_y_flux_wrap_send_if_required(y_local_index, x_local_index, q_field, parallel, local_grid)
     call complete_y_flux_wrap_send_if_required(y_local_index, q_field, parallel, local_grid)
     
     end subroutine differentiate_face_values_with_wrap_send_recv
-
+ 
 
   !> Advects a single scalar field
   subroutine advect_scalar_field(y_local_index, x_local_index, dt, u, v, w, z_q_field, q_field, source_field, &
@@ -868,12 +869,12 @@ contains
     if (field_stepping == FORWARD_STEPPING) then
       call ultflx(y_local_index, x_local_index, u, v, w, y_local_index, x_local_index, q_field, local_grid, &
            global_grid%configuration, parallel, 0, dt, &
-           flux_y, flux_z, flux_x, q_field%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdz,&
+           flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index), q_field%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdz,&
            global_grid%configuration%vertical%rdzn, global_grid%configuration%vertical%dzn, 2, local_grid%size(Z_INDEX))
     else
       call ultflx(y_local_index, x_local_index, u, v, w, y_local_index, x_local_index, z_q_field, local_grid, &
            global_grid%configuration, parallel, 0, dt, &
-           flux_y, flux_z, flux_x, q_field%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdz,&
+           flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index), q_field%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdz,&
            global_grid%configuration%vertical%rdzn, global_grid%configuration%vertical%dzn, 2, local_grid%size(Z_INDEX))
     end if
 
@@ -892,40 +893,40 @@ contains
     type(local_grid_type), intent(inout) :: local_grid
     type(parallel_state_type), intent(inout) :: parallel
 
-    if (.not. allocated(u%flux_previous_x)) allocate(u%flux_previous_x(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4))
-    if (.not. allocated(u%flux_previous_y)) allocate(u%flux_previous_y(local_grid%size(Z_INDEX)))
+    if (.not. allocated(u%flux_previous_x)) allocate(u%flux_previous_x(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
+    if (.not. allocated(u%flux_previous_y)) allocate(u%flux_previous_y(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
 
-    call register_y_flux_wrap_recv_if_required(y_local_index, u, parallel, local_grid)
+    call register_y_flux_wrap_recv_if_required(y_local_index, x_local_index, u, parallel, local_grid)
 
     call interpolate_to_dual(local_grid, u, star_stencil, x_local_index, y_local_index, interpolated_fields, u_index)
 
     if (field_stepping == FORWARD_STEPPING) then
       call ultflx(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, u, local_grid, global_grid%configuration, parallel, 0, &
-           dt, flux_y, flux_z, flux_x, &
-           u%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdz, &
+           dt, flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index), &
+           u%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdz, &
            global_grid%configuration%vertical%rdzn, global_grid%configuration%vertical%dzn, 2, local_grid%size(Z_INDEX))
     else
       ! Centred stepping
       call ultflx(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, zf, local_grid, global_grid%configuration, parallel, 0, &
-           dt, flux_y, flux_z, flux_x, &
-           u%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdz, &
+           dt, flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index), &
+           u%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdz, &
            global_grid%configuration%vertical%rdzn, global_grid%configuration%vertical%dzn, 2, local_grid%size(Z_INDEX))
     end if
 
-    call complete_y_flux_wrap_recv_if_required(y_local_index, u, parallel, local_grid)
+    call complete_y_flux_wrap_recv_if_required(y_local_index, x_local_index, u, parallel, local_grid)
 
     if (.not. halo_column) then
       call differentiate_face_values(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, su, local_grid, global_grid, &
-           u%flux_previous_y, u%flux_previous_x(:,y_local_index), &
+           u%flux_previous_y(:,y_local_index, x_local_index), u%flux_previous_x(:,y_local_index, x_local_index), &
            global_grid%configuration%vertical%tzc1, global_grid%configuration%vertical%tzc2, .true.)
       u_advection=su%data(:, y_local_index, x_local_index)
     end if
 
-    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) u%flux_previous_y(:) = flux_y(:)
-    call register_y_flux_wrap_send_if_required(y_local_index, u, parallel, local_grid)
+    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) u%flux_previous_y(:,y_local_index, x_local_index) = flux_y(:,y_local_index, x_local_index)
+    call register_y_flux_wrap_send_if_required(y_local_index, x_local_index, u, parallel, local_grid)
     call complete_y_flux_wrap_send_if_required(y_local_index, u, parallel, local_grid)
   end subroutine advect_u
 
@@ -941,40 +942,40 @@ contains
     type(local_grid_type), intent(inout) :: local_grid
     type(parallel_state_type), intent(inout) :: parallel
 
-    if (.not. allocated(v%flux_previous_x)) allocate(v%flux_previous_x(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4))
-    if (.not. allocated(v%flux_previous_y)) allocate(v%flux_previous_y(local_grid%size(Z_INDEX)))
+    if (.not. allocated(v%flux_previous_x)) allocate(v%flux_previous_x(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
+    if (.not. allocated(v%flux_previous_y)) allocate(v%flux_previous_y(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
 
-    call register_y_flux_wrap_recv_if_required(y_local_index, v, parallel, local_grid)
+    call register_y_flux_wrap_recv_if_required(y_local_index, x_local_index, v, parallel, local_grid)
 
     call interpolate_to_dual(local_grid, v, star_stencil, x_local_index, y_local_index, interpolated_fields, v_index)
 
     if (field_stepping == FORWARD_STEPPING) then
       call ultflx(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, v, local_grid, global_grid%configuration, parallel, 0, &
-           dt, flux_y, flux_z, flux_x, &
-           v%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdz, &
+           dt, flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index), &
+           v%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdz, &
            global_grid%configuration%vertical%rdzn, global_grid%configuration%vertical%dzn, 2, local_grid%size(Z_INDEX))
     else
       ! Centred stepping
       call ultflx(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, zf, local_grid, global_grid%configuration, parallel, 0, &
-           dt, flux_y, flux_z, flux_x, &
-           v%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdz, &
+           dt, flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index), &
+           v%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdz, &
            global_grid%configuration%vertical%rdzn, global_grid%configuration%vertical%dzn, 2, local_grid%size(Z_INDEX))
     end if
 
-    call complete_y_flux_wrap_recv_if_required(y_local_index, v, parallel, local_grid)
+    call complete_y_flux_wrap_recv_if_required(y_local_index, x_local_index, v, parallel, local_grid)
 
     if (.not. halo_column) then
       call differentiate_face_values(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, sv, local_grid, global_grid, &
-           v%flux_previous_y, v%flux_previous_x(:,y_local_index), &           
+           v%flux_previous_y(:,y_local_index, x_local_index), v%flux_previous_x(:,y_local_index, x_local_index), &           
            global_grid%configuration%vertical%tzc1, global_grid%configuration%vertical%tzc2, .true.)
       v_advection=sv%data(:, y_local_index, x_local_index)
     end if
 
-    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) v%flux_previous_y(:) = flux_y(:)
-    call register_y_flux_wrap_send_if_required(y_local_index, v, parallel, local_grid)
+    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) v%flux_previous_y(:,y_local_index, x_local_index) = flux_y(:,y_local_index, x_local_index)
+    call register_y_flux_wrap_send_if_required(y_local_index, x_local_index, v, parallel, local_grid)
     call complete_y_flux_wrap_send_if_required(y_local_index, v, parallel, local_grid)
   end subroutine advect_v
 
@@ -990,39 +991,39 @@ contains
     type(local_grid_type), intent(inout) :: local_grid
     type(parallel_state_type), intent(inout) :: parallel
 
-    if (.not. allocated(w%flux_previous_x)) allocate(w%flux_previous_x(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4))
-    if (.not. allocated(w%flux_previous_y)) allocate(w%flux_previous_y(local_grid%size(Z_INDEX)))
+    if (.not. allocated(w%flux_previous_x)) allocate(w%flux_previous_x(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
+    if (.not. allocated(w%flux_previous_y)) allocate(w%flux_previous_y(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
 
-    call register_y_flux_wrap_recv_if_required(y_local_index, w, parallel, local_grid)
+    call register_y_flux_wrap_recv_if_required(y_local_index, x_local_index, w, parallel, local_grid)
 
     call interpolate_to_dual(local_grid, w, star_stencil, x_local_index, y_local_index, interpolated_fields, w_index)
 
     if (field_stepping == FORWARD_STEPPING) then
       call ultflx(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, w, local_grid, global_grid%configuration, parallel, 1, &
-           dt, flux_y, flux_z, flux_x,&
-           w%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdzn, &
+           dt, flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index),&
+           w%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdzn, &
            global_grid%configuration%vertical%rdz, global_grid%configuration%vertical%dz, 1, local_grid%size(Z_INDEX)-1)
     else
       ! Centred stepping
       call ultflx(1, 1, interpolated_fields(u_index), interpolated_fields(v_index), &
            interpolated_fields(w_index), y_local_index, x_local_index, zf, local_grid, global_grid%configuration, parallel, 1, &
-           dt, flux_y, flux_z, flux_x,&
-           w%flux_previous_x(:,y_local_index), global_grid%configuration%vertical%rdzn, &
+           dt, flux_y(:,y_local_index, x_local_index), flux_z(:,y_local_index, x_local_index), flux_x(:,y_local_index, x_local_index),&
+           w%flux_previous_x(:,y_local_index, x_local_index), global_grid%configuration%vertical%rdzn, &
            global_grid%configuration%vertical%rdz, global_grid%configuration%vertical%dz, 1, local_grid%size(Z_INDEX)-1)
     end if
 
-    call complete_y_flux_wrap_recv_if_required(y_local_index, w, parallel, local_grid)
+    call complete_y_flux_wrap_recv_if_required(y_local_index, x_local_index, w, parallel, local_grid)
 
     if (.not. halo_column) then
       call differentiate_face_values(1, 1, interpolated_fields(u_index), interpolated_fields(v_index),&
            interpolated_fields(w_index), y_local_index, x_local_index, sw, local_grid, global_grid, &
-           w%flux_previous_y, w%flux_previous_x(:,y_local_index),&
+           w%flux_previous_y(:,y_local_index,x_local_index), w%flux_previous_x(:,y_local_index,x_local_index),&
            global_grid%configuration%vertical%tzd1, global_grid%configuration%vertical%tzd2, .false.)
       w_advection=sw%data(:, y_local_index, x_local_index)
     end if
-    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) w%flux_previous_y(:) = flux_y(:)
-    call register_y_flux_wrap_send_if_required(y_local_index, w, parallel, local_grid)
+    if (y_local_index .lt. local_grid%local_domain_end_index(Y_INDEX)) w%flux_previous_y(:,y_local_index, x_local_index) = flux_y(:,y_local_index, x_local_index)
+    call register_y_flux_wrap_send_if_required(y_local_index, x_local_index, w, parallel, local_grid)
     call complete_y_flux_wrap_send_if_required(y_local_index, w, parallel, local_grid)
   end subroutine advect_w
 
@@ -1044,17 +1045,17 @@ contains
     do k=2,local_grid%size(Z_INDEX)-1
 #ifdef V_ACTIVE
       source_field%data(k, y_source_index, x_source_index)=source_field%data(k, y_source_index, x_source_index)+&
-           (v%data(k, y_flow_index-1, x_flow_index)* flux_y_previous(k) - v%data(k, y_flow_index, x_flow_index)*flux_y(k))*&
+           (v%data(k, y_flow_index-1, x_flow_index)* flux_y_previous(k) - v%data(k, y_flow_index, x_flow_index)*flux_y(k,y_flow_index, x_flow_index))*&
            global_grid%configuration%horizontal%cy
 #endif
 #ifdef W_ACTIVE
       source_field%data(k, y_source_index, x_source_index)=source_field%data(k, y_source_index, x_source_index)+&
-           4.0_DEFAULT_PRECISION*(w%data(k-1, y_flow_index, x_flow_index)* flux_z(k)*tzc1(k) - &
-           w%data(k, y_flow_index, x_flow_index)*flux_z(k+1)*tzc2(k))
+           4.0_DEFAULT_PRECISION*(w%data(k-1, y_flow_index, x_flow_index)* flux_z(k,y_flow_index, x_flow_index)*tzc1(k) - &
+           w%data(k, y_flow_index, x_flow_index)*flux_z(k+1,y_flow_index, x_flow_index)*tzc2(k))
 #endif
 #ifdef U_ACTIVE
       source_field%data(k, y_source_index, x_source_index)=source_field%data(k, y_source_index, x_source_index)+&
-           (u%data(k, y_flow_index, x_flow_index-1)* flux_x(k) - u%data(k, y_flow_index, x_flow_index)*flux_x_previous(k))*&
+           (u%data(k, y_flow_index, x_flow_index-1)* flux_x(k, y_flow_index, x_flow_index) - u%data(k, y_flow_index, x_flow_index)*flux_x_previous(k))*&
            global_grid%configuration%horizontal%cx
 #endif
     end do
@@ -1063,16 +1064,16 @@ contains
       source_field%data(k, y_source_index, x_source_index)=0.0_DEFAULT_PRECISION
 #ifdef V_ACTIVE
       source_field%data(k, y_source_index, x_source_index)=source_field%data(k, y_source_index, x_source_index)+&
-           (v%data(k, y_flow_index-1, x_flow_index)* flux_y_previous(k) - v%data(k, y_flow_index, x_flow_index)*flux_y(k))*&
+           (v%data(k, y_flow_index-1, x_flow_index)* flux_y_previous(k) - v%data(k, y_flow_index, x_flow_index)*flux_y(k, y_flow_index, x_flow_index))*&
            global_grid%configuration%horizontal%cy
 #endif
 #ifdef W_ACTIVE
       source_field%data(k, y_source_index, x_source_index)=source_field%data(k, y_source_index, x_source_index)+&
-           4.0_DEFAULT_PRECISION*tzc1(k)* w%data(k-1, y_flow_index, x_flow_index)*flux_z(k)
+           4.0_DEFAULT_PRECISION*tzc1(k)* w%data(k-1, y_flow_index, x_flow_index)*flux_z(k, y_flow_index, x_flow_index)
 #endif
 #ifdef U_ACTIVE
       source_field%data(k, y_source_index, x_source_index)=source_field%data(k, y_source_index, x_source_index)+&
-           (u%data(k, y_flow_index, x_flow_index-1)* flux_x(k) -u%data(k, y_flow_index, x_flow_index)*flux_x_previous(k))*&
+           (u%data(k, y_flow_index, x_flow_index-1)* flux_x(k, y_flow_index, x_flow_index) -u%data(k, y_flow_index, x_flow_index)*flux_x_previous(k))*&
            global_grid%configuration%horizontal%cx
 #endif
     end if
@@ -1106,8 +1107,8 @@ contains
   !! @param field The prognostic field
   !! @param parallel Parallel system description
   !! @param local_grid The local grid description
-  subroutine register_y_flux_wrap_send_if_required(y_local_index, field, parallel, local_grid)
-    integer, intent(in) :: y_local_index
+  subroutine register_y_flux_wrap_send_if_required(y_local_index, x_local_index, field, parallel, local_grid)
+    integer, intent(in) :: y_local_index, x_local_index
     type(prognostic_field_type), intent(inout) :: field
     type(parallel_state_type), intent(inout) :: parallel
     type(local_grid_type), intent(inout) :: local_grid
@@ -1115,10 +1116,10 @@ contains
     integer :: ierr
 
     if (y_local_index == local_grid%local_domain_start_index(Y_INDEX)-1 .and. parallel%my_coords(Y_INDEX) == 0) then
-      if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX)))
-      field%flux_y_buffer(:) = flux_y(:)
+      if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
+      field%flux_y_buffer(:, y_local_index, x_local_index) = flux_y(:, y_local_index, x_local_index)
       if (parallel%my_rank .ne. local_grid%neighbours(Y_INDEX,1)) then      
-        call mpi_isend(field%flux_y_buffer, local_grid%size(Z_INDEX), PRECISION_TYPE, local_grid%neighbours(Y_INDEX,1), 0, &
+        call mpi_isend(field%flux_y_buffer(:, y_local_index, x_local_index), local_grid%size(Z_INDEX), PRECISION_TYPE, local_grid%neighbours(Y_INDEX,1), 0, &
              parallel%neighbour_comm, field%async_flux_handle, ierr)
       end if
     end if
@@ -1130,8 +1131,8 @@ contains
   !! @param field The prognostic field
   !! @param parallel Parallel system description
   !! @param local_grid The local grid description
-  subroutine complete_y_flux_wrap_recv_if_required(y_local_index, field, parallel, local_grid)
-    integer, intent(in) :: y_local_index
+  subroutine complete_y_flux_wrap_recv_if_required(y_local_index, x_local_index, field, parallel, local_grid)
+    integer, intent(in) :: y_local_index, x_local_index
     type(prognostic_field_type), intent(inout) :: field
     type(parallel_state_type), intent(inout) :: parallel
     type(local_grid_type), intent(inout) :: local_grid
@@ -1143,7 +1144,7 @@ contains
       if (field%async_flux_handle .ne. MPI_REQUEST_NULL) then
         call mpi_wait(field%async_flux_handle, MPI_STATUS_IGNORE, ierr)
       end if
-      flux_y(:) = field%flux_y_buffer(:)
+      flux_y(:, y_local_index, x_local_index) = field%flux_y_buffer(:, y_local_index, x_local_index)
     end if
   end subroutine complete_y_flux_wrap_recv_if_required
 
@@ -1155,8 +1156,8 @@ contains
   !! @param field The prognostic field
   !! @param parallel Parallel system description
   !! @param local_grid The local grid description
-  subroutine register_y_flux_wrap_recv_if_required(y_local_index, field, parallel, local_grid)
-    integer, intent(in) :: y_local_index
+  subroutine register_y_flux_wrap_recv_if_required(y_local_index, x_local_index, field, parallel, local_grid)
+    integer, intent(in) :: y_local_index, x_local_index
     type(prognostic_field_type), intent(inout) :: field
     type(parallel_state_type), intent(inout) :: parallel
     type(local_grid_type), intent(inout) :: local_grid
@@ -1166,8 +1167,8 @@ contains
     if (y_local_index == local_grid%local_domain_start_index(Y_INDEX) .and. parallel%my_coords(Y_INDEX) == &
          parallel%dim_sizes(Y_INDEX)-1) then
       if (parallel%my_rank .ne. local_grid%neighbours(Y_INDEX,3)) then
-        if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX)))
-        call mpi_irecv(field%flux_y_buffer, local_grid%size(Z_INDEX), PRECISION_TYPE, local_grid%neighbours(Y_INDEX,3), 0, &
+        if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX)+4, local_grid%size(X_INDEX)+4))
+        call mpi_irecv(field%flux_y_buffer(:, y_local_index, x_local_index), local_grid%size(Z_INDEX), PRECISION_TYPE, local_grid%neighbours(Y_INDEX,3), 0, &
              parallel%neighbour_comm, field%async_flux_handle, ierr)
       end if
     end if
