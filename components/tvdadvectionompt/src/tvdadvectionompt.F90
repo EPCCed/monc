@@ -759,8 +759,8 @@ contains
     integer, intent(in) :: field_stepping
     integer :: x, y
     logical :: profile_diagnostics_enabled
-    integer :: count_start, count_end, count_rate, count_end_transfer_to
-    real(KIND=8) :: time_elapsed_gpu_compute, time_elapsed_gpu_transfer_to
+    integer :: count_start, count_end, count_rate, count_end_transfer_to, count_end_transfer_from
+    real(KIND=8) :: time_elapsed_gpu_compute, time_elapsed_gpu_transfer_to, time_elapsed_gpu_transfer_from
 
     real(kind=DEFAULT_PRECISION) :: dtm
 
@@ -781,6 +781,7 @@ contains
       call SYSTEM_CLOCK(COUNT_RATE=count_rate)
 
       !$OMP target enter data map(to: u,v, w, zth, th, sth, flux_y, flux_z, flux_x)
+      !$OMP target enter data map(to: u%data,v%data, w%data, zth%data, th%data, sth%data)
 
       call SYSTEM_CLOCK(COUNT=count_end_transfer_to)
 
@@ -802,12 +803,20 @@ contains
       end do
       !$OMP end target teams distribute parallel do
 
+      call SYSTEM_CLOCK(COUNT=count_end_transfer_from)
+
+      !$OMP target exit data map(from: u%data,v%data, w%data, zth%data, th%data, sth%data, flux_y, flux_z, flux_x)
+
+
       call SYSTEM_CLOCK(COUNT=count_end)
       time_elapsed_gpu_transfer_to = REAL(count_end_transfer_to - count_start, KIND=8) / REAL(count_rate, KIND=8)
-      time_elapsed_gpu_compute = REAL(count_end - count_end_transfer_to, KIND=8) / REAL(count_rate, KIND=8)
-      call log_master_log(LOG_INFO, "Accelerating advection: theta, times: "//trim(conv_to_string(time_elapsed_gpu_transfer_to))//" "//trim(conv_to_string(time_elapsed_gpu_compute)))
+      time_elapsed_gpu_compute = REAL(count_end_transfer_from - count_end_transfer_to, KIND=8) / REAL(count_rate, KIND=8)
+      time_elapsed_gpu_transfer_from = REAL(count_end - count_end_transfer_from, KIND=8) / REAL(count_rate, KIND=8)
+      call log_master_log(LOG_INFO, "Accelerating advection: theta, time (s) transfer to device: "//trim(conv_to_string(time_elapsed_gpu_transfer_to)))
+      call log_master_log(LOG_INFO, "Accelerating advection: theta, time (s) transfer device compute: "//trim(conv_to_string(time_elapsed_gpu_compute)))
+      call log_master_log(LOG_INFO, "Accelerating advection: theta, time (s) transfer from device: "//trim(conv_to_string(time_elapsed_gpu_transfer_from)))
 
-      !!$OMP target exit data map(from: u,v, w, zth, th, sth, flux_y, flux_z, flux_x)
+    
 
       do x = local_domain_start_index(X_INDEX)-1, local_domain_end_index(X_INDEX)
         do y = local_domain_start_index(Y_INDEX)-1, local_domain_end_index(Y_INDEX)
