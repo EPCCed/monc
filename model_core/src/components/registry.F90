@@ -8,6 +8,7 @@ module registry_mod
        c_get_string, c_get_generic, c_remove, c_put_generic, c_put_string, c_put_integer, c_put_real, c_is_empty, &
        c_contains, c_add_generic, c_add_string, c_free, c_get_iterator, c_has_next, c_next_mapentry, mapentry_type
   use monc_component_mod, only : component_descriptor_type, component_field_value_type, component_field_information_type, &
+       component_initialisation, component_timestep, component_get_field_information, component_get_field_value, component_finalisation, &
        FINALISATION_PRIORITY_INDEX, INIT_PRIORITY_INDEX, TIMESTEP_PRIORITY_INDEX, &
        pointer_wrapper_value_type, pointer_wrapper_info_type, pointer_wrapper_init_type, pointer_wrapper_timestep_type, pointer_wrapper_finalisation_type
   use conversions_mod, only : conv_to_string
