@@ -41,17 +41,17 @@ module monc_component_mod
     procedure(component_get_field_information), nopass, pointer :: ptr
   end type pointer_wrapper_info_type
   
-!  type, public :: pointer_wrapper_init_type
-!    procedure(component_initialisation), nopass, pointer :: ptr
-!  end type pointer_wrapper_init_type
+ type, public :: pointer_wrapper_init_type
+   procedure(component_initialisation), nopass, pointer :: ptr
+ end type pointer_wrapper_init_type
   
-!  type, public :: pointer_wrapper_timestep_type
-!    procedure(component_timestep), nopass, pointer :: ptr
-!  end type pointer_wrapper_timestep_type
+ type, public :: pointer_wrapper_timestep_type
+   procedure(component_timestep), nopass, pointer :: ptr
+ end type pointer_wrapper_timestep_type
   
-!  type, public :: pointer_wrapper_finalisation_type
-!    procedure(component_finalisation), nopass, pointer :: ptr
-!  end type pointer_wrapper_finalisation_type
+ type, public :: pointer_wrapper_finalisation_type
+   procedure(component_finalisation), nopass, pointer :: ptr
+ end type pointer_wrapper_finalisation_type
 
     !> Description of a component
     !!

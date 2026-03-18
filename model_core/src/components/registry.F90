@@ -9,12 +9,14 @@ module registry_mod
        c_contains, c_add_generic, c_add_string, c_free, c_get_iterator, c_has_next, c_next_mapentry, mapentry_type
   use monc_component_mod, only : component_descriptor_type, component_field_value_type, component_field_information_type, &
        FINALISATION_PRIORITY_INDEX, INIT_PRIORITY_INDEX, TIMESTEP_PRIORITY_INDEX, &
-       pointer_wrapper_value_type, pointer_wrapper_info_type
+       pointer_wrapper_value_type, pointer_wrapper_info_type, pointer_wrapper_init_type, pointer_wrapper_timestep_type, pointer_wrapper_finalisation_type
   use conversions_mod, only : conv_to_string
   use state_mod, only : model_state_type
   use optionsdatabase_mod, only : options_has_key, options_get_string, options_get_logical, options_get_array_size
   use logging_mod, only : LOG_INFO, LOG_ERROR, LOG_WARN, log_master_log, log_is_master
   use grids_mod, only : X_INDEX, Y_INDEX, Z_INDEX
+  use prognostics_mod, only : prognostic_field_type
+  use datadefn_mod, only : DEFAULT_PRECISION
 
   implicit none
 
@@ -561,18 +563,18 @@ contains
   !! @param descriptor The component descriptor which is to be installed
   subroutine load_callback_hooks(descriptor, group_name)
     type(component_descriptor_type), intent(in) :: descriptor
-    character(len=*), intent(in), optional :: group_name
+    character(len=STRING_LENGTH), intent(in), optional :: group_name
 
-    if (associated(descriptor%initialisation)) call add_callback(init_callbacks, descriptor%name, descriptor%initialisation)
+    if (associated(descriptor%initialisation)) call add_callback_init(init_callbacks, descriptor%name, descriptor%initialisation)
     if (associated(descriptor%timestep)) then
       if (present(group_name)) then
-        call add_callback(timestep_callbacks(get_group_id(group_name)), descriptor%name, descriptor%timestep)
+        call add_callback_timestep(timestep_callbacks(get_group_id(group_name)), descriptor%name, descriptor%timestep)
       else
         call log_master_log(LOG_ERROR, "In the configuration you must provide a group for component "&
              //trim(descriptor%name)//" which has a timestep callback")
       end if
     end if
-    if (associated(descriptor%finalisation)) call add_callback(finalisation_callbacks, descriptor%name, descriptor%finalisation)
+    if (associated(descriptor%finalisation)) call add_callback_finalisation(finalisation_callbacks, descriptor%name, descriptor%finalisation)
   end subroutine load_callback_hooks
 
   subroutine rebalance_callbacks(callbacks, priorities, stage_name)
@@ -633,6 +635,8 @@ contains
     type(map_type), intent(inout) :: callback_map
     character(len=*), intent(in) :: debug_label
     type(model_state_type), intent(inout) :: current_state
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: zu, u, su, savu
+
 
     class(*), pointer :: data
     type(iterator_type) :: iterator
@@ -673,68 +677,69 @@ contains
           print "(a15,3i10)", &
                    '    stepping ',  current_state%scalar_stepping, current_state%momentum_stepping, &
                                      current_state%field_stepping
-          if (allocated(current_state%zu%data) .and. allocated(current_state%u%data) .and. &
-              allocated(current_state%su%data) .and. allocated(current_state%savu%data)) then
-            print "(a15,4es25.15)", &
-                   '           u ',  current_state%zu%data(k,j,i), current_state%u%data(k,j,i), &
-                                     current_state%su%data(k,j,i), current_state%savu%data(k,j,i)
-          endif
-          if (allocated(current_state%zv%data) .and. allocated(current_state%v%data) .and. &
-              allocated(current_state%sv%data) .and. allocated(current_state%savv%data)) then
-            print "(a15,4es25.15)", &
-                   '           v ',  current_state%zv%data(k,j,i), current_state%v%data(k,j,i), &
-                                     current_state%sv%data(k,j,i), current_state%savv%data(k,j,i)
-          endif
-          if (allocated(current_state%zw%data) .and. allocated(current_state%w%data) .and. &
-              allocated(current_state%sw%data) .and. allocated(current_state%savw%data)) then
-            print "(a15,4es25.15)", &
-                   '           w ',  current_state%zw%data(k,j,i), current_state%w%data(k,j,i), &
-                                     current_state%sw%data(k,j,i), current_state%savw%data(k,j,i)
-          endif
-          if (allocated(current_state%zth%data) .and. allocated(current_state%th%data) .and. &
-              allocated(current_state%sth%data)) then
-            print "(a15,3es25.15)", &
-                   '          th ',  current_state%zth%data(k,j,i), current_state%th%data(k,j,i), &
-                                     current_state%sth%data(k,j,i)
-          endif
-          if (allocated(current_state%zq(1)%data) .and. allocated(current_state%q(1)%data) .and. &
-              allocated(current_state%sq(1)%data)) then
-            print "(a15,3es25.15)", &
-                   '          qv ',  current_state%zq(1)%data(k,j,i), current_state%q(1)%data(k,j,i), &
-                                     current_state%sq(1)%data(k,j,i)
-          endif
-          if (allocated(current_state%p%data)) then
-            print "(a15,es25.15)", &
-                   '           p ',  current_state%p%data(k,j,i)
-          endif
-          if (allocated(current_state%vis_coefficient%data) .and. &
-              allocated(current_state%diff_coefficient%data)) then
-            print "(a15,2es25.15)", &
-                   '       coeff ',  current_state%vis_coefficient%data(k,j,i), &
-                                     current_state%diff_coefficient%data(k,j,i)
-          endif
-          if (allocated(current_state%global_grid%configuration%vertical%olzthbar) .and.&
-              allocated(current_state%global_grid%configuration%vertical%olthbar) ) then
-            print "(a15,2es25.15)", &
-                   '  olth(z)bar ', current_state%global_grid%configuration%vertical%olzthbar(k), &
-                                    current_state%global_grid%configuration%vertical%olthbar(k)
-          endif
-          if (allocated(current_state%global_grid%configuration%vertical%olzqbar) .and.&
-              allocated(current_state%global_grid%configuration%vertical%olqbar) ) then
-            print "(a15,2es25.15)", & 
-                   '   olq(z)bar ', current_state%global_grid%configuration%vertical%olzqbar(k,1), &
-                                    current_state%global_grid%configuration%vertical%olqbar(k,1)
-          endif
+        
+        !   if (allocated(current_state%zu%data) .and. allocated(current_state%u%data) .and. &
+        !       allocated(current_state%su%data) .and. allocated(current_state%savu%data)) then
+        !     print "(a15,4es25.15)", &
+        !            '           u ',  current_state%zu%data(k,j,i), current_state%u%data(k,j,i), &
+        !                              current_state%su%data(k,j,i), current_state%savu%data(k,j,i)
+        !   endif
+        !   if (allocated(current_state%zv%data) .and. allocated(current_state%v%data) .and. &
+        !       allocated(current_state%sv%data) .and. allocated(current_state%savv%data)) then
+        !     print "(a15,4es25.15)", &
+        !            '           v ',  current_state%zv%data(k,j,i), current_state%v%data(k,j,i), &
+        !                              current_state%sv%data(k,j,i), current_state%savv%data(k,j,i)
+        !   endif
+        !   if (allocated(current_state%zw%data) .and. allocated(current_state%w%data) .and. &
+        !       allocated(current_state%sw%data) .and. allocated(current_state%savw%data)) then
+        !     print "(a15,4es25.15)", &
+        !            '           w ',  current_state%zw%data(k,j,i), current_state%w%data(k,j,i), &
+        !                              current_state%sw%data(k,j,i), current_state%savw%data(k,j,i)
+        !   endif
+        !   if (allocated(current_state%zth%data) .and. allocated(current_state%th%data) .and. &
+        !       allocated(current_state%sth%data)) then
+        !     print "(a15,3es25.15)", &
+        !            '          th ',  current_state%zth%data(k,j,i), current_state%th%data(k,j,i), &
+        !                              current_state%sth%data(k,j,i)
+        !   endif
+        !   if (allocated(current_state%zq(1)%data) .and. allocated(current_state%q(1)%data) .and. &
+        !       allocated(current_state%sq(1)%data)) then
+        !     print "(a15,3es25.15)", &
+        !            '          qv ',  current_state%zq(1)%data(k,j,i), current_state%q(1)%data(k,j,i), &
+        !                              current_state%sq(1)%data(k,j,i)
+        !   endif
+        !   if (allocated(current_state%p%data)) then
+        !     print "(a15,es25.15)", &
+        !            '           p ',  current_state%p%data(k,j,i)
+        !   endif
+        !   if (allocated(current_state%vis_coefficient%data) .and. &
+        !       allocated(current_state%diff_coefficient%data)) then
+        !     print "(a15,2es25.15)", &
+        !            '       coeff ',  current_state%vis_coefficient%data(k,j,i), &
+        !                              current_state%diff_coefficient%data(k,j,i)
+        !   endif
+        !   if (allocated(current_state%global_grid%configuration%vertical%olzthbar) .and.&
+        !       allocated(current_state%global_grid%configuration%vertical%olthbar) ) then
+        !     print "(a15,2es25.15)", &
+        !            '  olth(z)bar ', current_state%global_grid%configuration%vertical%olzthbar(k), &
+        !                             current_state%global_grid%configuration%vertical%olthbar(k)
+        !   endif
+        !   if (allocated(current_state%global_grid%configuration%vertical%olzqbar) .and.&
+        !       allocated(current_state%global_grid%configuration%vertical%olqbar) ) then
+        !     print "(a15,2es25.15)", & 
+        !            '   olq(z)bar ', current_state%global_grid%configuration%vertical%olzqbar(k,1), &
+        !                             current_state%global_grid%configuration%vertical%olqbar(k,1)
+        !  endif
         end if ! test i and j or init/final callback
       end if ! test print_debug_data
 
 
-!        type is (pointer_wrapper_init_type)
-!          call data%ptr(current_state)
-!        type is (pointer_wrapper_timestep_type)
-!          call data%ptr(current_state)
-!        type is (pointer_wrapper_finalisation_type)
-!          call data%ptr(current_state)
+        type is (pointer_wrapper_init_type)
+          call data%ptr(current_state)
+        type is (pointer_wrapper_timestep_type)
+          call data%ptr(current_state)
+        type is (pointer_wrapper_finalisation_type)
+          call data%ptr(current_state)
       end select
     end do
   end subroutine execute_callbacks
@@ -743,60 +748,60 @@ contains
   !! @param callbackmap_type The map_type of existing callbacks which we are going to install this one into
   !! @param name The name of the callback that we are installing
   !! @param procedurePointer Pointer to the procedure which implements the callback
-  subroutine add_callback(callback_map, name, procedure_pointer)
-    type(map_type), intent(inout) :: callback_map
-    procedure(), pointer :: procedure_pointer
-    character(len=*), intent(in) :: name
-
-    type(pointer_wrapper_type), pointer :: wrapper
-    class(*), pointer :: genericwrapper
-
-    allocate(wrapper) ! We allocate our own copy of the descriptor here to ensure the consistency of registry information
-    wrapper%ptr => procedure_pointer
-    genericwrapper=>wrapper
-    call c_put_generic(callback_map, name, genericwrapper, .false.)
-  end subroutine add_callback
-  
-!  subroutine add_callback_init(callback_map, name, procedure_pointer)
+!  subroutine add_callback(callback_map, name, procedure_pointer)
 !    type(map_type), intent(inout) :: callback_map
-!    procedure(component_initialisation), pointer :: procedure_pointer
+!    procedure(*), pointer, intent(in) :: procedure_pointer
 !    character(len=*), intent(in) :: name
-
-!    type(pointer_wrapper_init_type), pointer :: wrapper
+!
+!    type(pointer_wrapper_type), pointer :: wrapper
 !    class(*), pointer :: genericwrapper
-
+!
 !    allocate(wrapper) ! We allocate our own copy of the descriptor here to ensure the consistency of registry information
 !    wrapper%ptr => procedure_pointer
 !    genericwrapper=>wrapper
 !    call c_put_generic(callback_map, name, genericwrapper, .false.)
-!  end subroutine add_callback_init
+!  end subroutine add_callback
   
-!  subroutine add_callback_timestep(callback_map, name, procedure_pointer)
-!    type(map_type), intent(inout) :: callback_map
-!    procedure(component_timestep), pointer :: procedure_pointer
-!    character(len=*), intent(in) :: name
+ subroutine add_callback_init(callback_map, name, procedure_pointer)
+   type(map_type), intent(inout) :: callback_map
+   procedure(component_initialisation), pointer :: procedure_pointer
+   character(len=STRING_LENGTH), intent(in) :: name
 
-!    type(pointer_wrapper_timestep_type), pointer :: wrapper
-!    class(*), pointer :: genericwrapper
+   type(pointer_wrapper_init_type), pointer :: wrapper
+   class(*), pointer :: genericwrapper
 
-!    allocate(wrapper)
-!    wrapper%ptr => procedure_pointer
-!    genericwrapper=>wrapper
-!    call c_put_generic(callback_map, name, genericwrapper, .false.)
-!  end subroutine add_callback_timestep
+   allocate(wrapper) ! We allocate our own copy of the descriptor here to ensure the consistency of registry information
+   wrapper%ptr => procedure_pointer
+   genericwrapper=>wrapper
+   call c_put_generic(callback_map, name, genericwrapper, .false.)
+ end subroutine add_callback_init
   
-!  subroutine add_callback_finalisation(callback_map, name, procedure_pointer)
-!    type(map_type), intent(inout) :: callback_map
-!    procedure(component_finalisation), pointer :: procedure_pointer
-!    character(len=*), intent(in) :: name
+ subroutine add_callback_timestep(callback_map, name, procedure_pointer)
+   type(map_type), intent(inout) :: callback_map
+   procedure(component_timestep), pointer :: procedure_pointer
+   character(len=STRING_LENGTH), intent(in) :: name
 
-!    type(pointer_wrapper_finalisation_type), pointer :: wrapper
-!    class(*), pointer :: genericwrapper
+   type(pointer_wrapper_timestep_type), pointer :: wrapper
+   class(*), pointer :: genericwrapper
 
-!    allocate(wrapper)
-!    wrapper%ptr => procedure_pointer
-!    genericwrapper=>wrapper
-!    call c_put_generic(callback_map, name, genericwrapper, .false.)
-!  end subroutine add_callback_finalisation
+   allocate(wrapper)
+   wrapper%ptr => procedure_pointer
+   genericwrapper=>wrapper
+   call c_put_generic(callback_map, name, genericwrapper, .false.)
+ end subroutine add_callback_timestep
+  
+ subroutine add_callback_finalisation(callback_map, name, procedure_pointer)
+   type(map_type), intent(inout) :: callback_map
+   procedure(component_finalisation), pointer :: procedure_pointer
+   character(len=STRING_LENGTH), intent(in) :: name
+
+   type(pointer_wrapper_finalisation_type), pointer :: wrapper
+   class(*), pointer :: genericwrapper
+
+   allocate(wrapper)
+   wrapper%ptr => procedure_pointer
+   genericwrapper=>wrapper
+   call c_put_generic(callback_map, name, genericwrapper, .false.)
+ end subroutine add_callback_finalisation
   
 end module registry_mod
