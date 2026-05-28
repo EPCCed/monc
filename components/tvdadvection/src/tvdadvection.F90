@@ -1003,7 +1003,8 @@ contains
     integer :: ierr
 
     if (y_local_index == local_grid%local_domain_start_index(Y_INDEX)-1 .and. parallel%my_coords(Y_INDEX) == 0) then
-      if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX), local_grid%size(X_INDEX)))
+      if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX), &
+              local_grid%size(Y_INDEX) + 4, local_grid%size(X_INDEX) + 4))
       field%flux_y_buffer(:, y_local_index, x_local_index) = flux_y(:)
       if (parallel%my_rank .ne. local_grid%neighbours(Y_INDEX,1)) then      
         call mpi_isend(field%flux_y_buffer(:, y_local_index, x_local_index), local_grid%size(Z_INDEX), PRECISION_TYPE, local_grid%neighbours(Y_INDEX,1), 0, &
@@ -1054,7 +1055,8 @@ contains
     if (y_local_index == local_grid%local_domain_start_index(Y_INDEX) .and. parallel%my_coords(Y_INDEX) == &
          parallel%dim_sizes(Y_INDEX)-1) then
       if (parallel%my_rank .ne. local_grid%neighbours(Y_INDEX,3)) then
-        if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX), local_grid%size(Y_INDEX), local_grid%size(X_INDEX)))
+        if (.not. allocated(field%flux_y_buffer)) allocate(field%flux_y_buffer(local_grid%size(Z_INDEX), &
+                local_grid%size(Y_INDEX) + 4, local_grid%size(X_INDEX) + 4))
         call mpi_irecv(field%flux_y_buffer(:, y_local_index, x_local_index), local_grid%size(Z_INDEX), PRECISION_TYPE, local_grid%neighbours(Y_INDEX,3), 0, &
              parallel%neighbour_comm, field%async_flux_handle, ierr)
       end if
