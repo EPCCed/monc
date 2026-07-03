@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "ft_consts.h"
 
