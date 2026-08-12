@@ -15,6 +15,13 @@ module pencil_fft_mod
   use optionsdatabase_mod, only: options_get_integer
   use logging_mod, only: LOG_INFO, log_master_log, log_master_newline
   use conversions_mod, only : conv_to_string
+#ifdef GPU
+#if defined(CUDA)
+  use cudafor
+  use cufft
+#elif defined(ROCM)
+#endif
+#endif
   implicit none
 
 #ifndef TEST_MODE
@@ -44,6 +51,11 @@ module pencil_fft_mod
   !counters for number of times the fft routines are called and the time spent in them
   integer :: nforward, nback
   double precision :: tforward, tback
+
+  ! plans for cufft/rocfft
+  integer :: plans(4)=0
+  logical :: plan_defined(4)=.false.
+
 
 contains
 
@@ -431,6 +443,68 @@ contains
     end do    
   end subroutine contiguise_data
 
+#ifdef CUDA
+  !> Cuda initialisation forward transform
+  !! @param plan fft plan for specific transform
+  !! @param n Size of transform
+  !! @param istat status flag for cuda function
+  subroutine fft_r2c_gpu_init(plan, n, istat)
+    integer, intent(inout) :: plan
+    integer, intent(in) :: n
+    integer, intent(inout) :: istat
+    istat = cufftPlan1D(plan,n,CUFFT_D2Z,1)
+  end subroutine fft_r2c_gpu_init
+
+  !> Cuda initialisation backward transform
+  !! @param plan fft plan for specific transform
+  !! @param n Size of transform
+  !! @param istat status flag for cuda function
+  subroutine fft_c2r_gpu_init(plan, n, istat)
+    integer, intent(inout) :: plan
+    integer, intent(in) :: n
+    integer, intent(inout) :: istat
+    istat = cufftPlan1D(plan,n,CUFFT_Z2D,1)
+  end subroutine fft_c2r_gpu_init
+
+  !> Carry out forward fft with cuda
+  !! @param in Data to transform
+  !! @param out Transformed data
+  !! @param nt Size of transform
+  !! @param plan fft plan for specific transform
+  subroutine fft_r2c_gpu(in, out, nt, plan)
+    double precision, intent(inout) :: in(nt)
+    complex*16, intent(inout) :: out(nt/2+1)
+    integer, intent(in) :: nt !< size of transform
+    integer, intent(inout) :: plan
+    double precision, allocatable, device, dimension(:) :: in_d
+    complex*16, allocatable, device, dimension(:) :: out_d
+    integer :: istat
+    allocate(in_d(nt), out_d(nt/2+1))
+    in_d = in
+    istat = cufftExecD2Z(plan, in_d, out_d)
+    out = out_d
+  end subroutine fft_r2c_gpu
+
+  !> Carry out backward fft with cuda
+  !! @param in Data to transform
+  !! @param out Transformed data
+  !! @param nt Size of transform
+  !! @param plan fft plan for specific transform
+  subroutine fft_c2r_gpu(in, out, nt, plan)
+    integer, intent(inout) :: plan
+    complex*16, intent(inout) :: in(nt/2+1)
+    double precision, intent(inout) :: out(nt)
+    integer, intent(in) :: nt !< size of transform
+    complex*16, allocatable, device, dimension(:) :: in_d
+    double precision, allocatable, device, dimension(:) :: out_d
+    integer :: istat
+    allocate(in_d(nt/2+1), out_d(nt))
+    in_d = in
+    istat = cufftExecZ2D(plan, in_d, out_d)
+    out = out_d/nt
+  end subroutine fft_c2r_gpu
+#endif
+
   !> Actually performs a forward real to complex FFT
   !! @param source_data Source (real) data in the time domain
   !! @param transformed_data Resulting complex data in the frequency domain
@@ -441,11 +515,12 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), contiguous, pointer, intent(inout) :: source_data
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(inout) :: transformed_data
     integer, intent(in) :: row_size, num_rows, plan_id
-    integer :: i, j
+    integer :: i, j, istat, ncols
     double precision :: tstart, tstop
+    ncols=size(source_data,2)
 
     tstart = MPI_Wtime()
-
+#if !defined(GPU)
     call fftn_init(row_size)
 
     do i=1,size(source_data,3)
@@ -455,6 +530,18 @@ contains
     enddo
 
     call fftn_finalise()
+#else
+    ! create plan if not already created
+    if (.not. plan_defined(plan_id)) then
+      call fft_r2c_gpu_init(plans(plan_id),row_size, istat)
+      plan_defined(plan_id) = .true.
+    end if
+    do i=1,size(source_data,3)
+      do j=1, size(source_data,2)
+        call fft_r2c_gpu(source_data(:,j,i),transformed_data(:,j,i),row_size, plans(plan_id))
+      enddo
+    enddo
+#endif
 
     tstop = mpi_wtime()
 
@@ -472,11 +559,12 @@ contains
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(inout) :: source_data
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), contiguous, pointer, intent(inout) :: transformed_data
     integer, intent(in) :: row_size, num_rows, plan_id
-    integer :: i,j
+    integer :: i,j, istat, ncols
     double precision :: tstart, tstop
+    ncols=size(source_data,2)
 
     tstart = MPI_Wtime()
-
+#if !defined(GPU)
     call fftn_init(row_size)
 
     do i=1,size(source_data,3)
@@ -486,7 +574,18 @@ contains
     enddo
 
     call fftn_finalise()
-
+#else
+    ! create plan if not already created
+    if (.not. plan_defined(plan_id)) then
+      call fft_c2r_gpu_init(plans(plan_id),row_size, istat)
+      plan_defined(plan_id) = .true.
+    end if
+    do i=1,size(source_data,3)
+      do j=1,size(source_data,2)
+        call fft_c2r_gpu(source_data(:,j,i),transformed_data(:,j,i),row_size, plans(plan_id))
+      enddo
+    enddo
+#endif
     tstop = mpi_wtime()
 
     nback = nback +1
