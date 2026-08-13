@@ -126,7 +126,7 @@ contains
 #if defined(GPU)
     call log_master_log(LOG_INFO, "Using GPU for FFT")
 #else
-    call log_master_log(LOG_INFO, "Using GPU for FFT")
+    call log_master_log(LOG_INFO, "Using CPU for FFT")
 #endif
     call log_master_log(LOG_INFO, "Total time in forward FFT ="//trim(conv_to_string(tforward))//" s")
     call log_master_log(LOG_INFO, "Total time in backward FFT ="//trim(conv_to_string(tback))//" s")
