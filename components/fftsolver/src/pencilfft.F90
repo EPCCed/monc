@@ -116,12 +116,22 @@ contains
   subroutine finalise_pencil_fft(monc_communicator)
     integer, intent(in) :: monc_communicator
     integer :: ierr, i
+    double precision :: t_per_forward, t_per_backward
 
+    t_per_forward = tforward/nforward
+    t_per_backward= tback/nback
     !call MPI_Allreduce(tforward,tgf,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr))
     !call MPI_Allreduce(tbackward,tgb,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr))
     call MPI_Comm_rank(monc_communicator,i,ierr)
+#if defined(GPU)
+    call log_master_log(LOG_INFO, "Using GPU for FFT")
+#else
+    call log_master_log(LOG_INFO, "Using GPU for FFT")
+#endif
     call log_master_log(LOG_INFO, "Total time in forward FFT ="//trim(conv_to_string(tforward))//" s")
     call log_master_log(LOG_INFO, "Total time in backward FFT ="//trim(conv_to_string(tback))//" s")
+    call log_master_log(LOG_INFO, "Time per forward FFT ="//trim(conv_to_string(t_per_forward))//" s")
+    call log_master_log(LOG_INFO, "Time per backward FFT ="//trim(conv_to_string(t_per_backward))//" s")
 
     if (dim_y_comm .ne. MPI_COMM_SELF .and. dim_y_comm .ne. monc_communicator) call mpi_comm_free(dim_y_comm, ierr)
     if (dim_x_comm .ne. MPI_COMM_SELF .and. dim_x_comm .ne. monc_communicator) call mpi_comm_free(dim_x_comm, ierr)
