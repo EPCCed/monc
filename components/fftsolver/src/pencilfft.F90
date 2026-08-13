@@ -533,9 +533,11 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), contiguous, pointer, intent(inout) :: source_data
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(inout) :: transformed_data
     integer, intent(in) :: row_size, num_rows, plan_id
-    integer :: i, j, istat, ncols, ncol_tot, nbatches, off_start, off_end
+    integer :: i, j, istat, ncols, ncols2, ncols3
     double precision :: tstart, tstop
-    ncols=size(source_data,2)
+    ncols2=size(source_data,2)
+    ncols3=size(source_data,3)
+    ncols=size(source_data,2)* size(source_data,3)
 
     tstart = MPI_Wtime()
 #if !defined(GPU)
@@ -554,9 +556,7 @@ contains
       call fft_r2c_gpu_init(plans(plan_id),row_size, istat, ncols)
       plan_defined(plan_id) = .true.
     end if
-    do i=1,size(source_data,3)
-      call fft_r2c_gpu(source_data(:,1:ncols,i),transformed_data(:,1:ncols,i),row_size, plans(plan_id),ncols)
-    enddo
+    call fft_r2c_gpu(source_data(:,1:ncols2,1:ncols3),transformed_data(:,1:ncols2,1:ncols3),row_size, plans(plan_id),ncols)
 #endif
 
     tstop = mpi_wtime()
@@ -575,9 +575,11 @@ contains
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(inout) :: source_data
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), contiguous, pointer, intent(inout) :: transformed_data
     integer, intent(in) :: row_size, num_rows, plan_id
-    integer :: i,j, istat, ncols
+    integer :: i,j, istat, ncols, ncols2,ncols3
     double precision :: tstart, tstop
-    ncols=size(source_data,2)
+    ncols2=size(source_data,2)
+    ncols3=size(source_data,3)
+    ncols=size(source_data,2)* size(source_data,3)
 
     tstart = MPI_Wtime()
 #if !defined(GPU)
@@ -596,9 +598,7 @@ contains
       call fft_c2r_gpu_init(plans(plan_id),row_size, istat,ncols)
       plan_defined(plan_id) = .true.
     end if
-    do i=1,size(source_data,3)
-      call fft_c2r_gpu(source_data(:,1:ncols,i),transformed_data(:,1:ncols,i),row_size, plans(plan_id),ncols)
-    enddo
+    call fft_c2r_gpu(source_data(:,1:ncols2,1:ncols3),transformed_data(:,1:ncols2,1:ncols3),row_size, plans(plan_id),ncols)
 #endif
     tstop = mpi_wtime()
 
