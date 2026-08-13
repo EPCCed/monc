@@ -448,22 +448,24 @@ contains
   !! @param plan fft plan for specific transform
   !! @param n Size of transform
   !! @param istat status flag for cuda function
-  subroutine fft_r2c_gpu_init(plan, n, istat)
+  subroutine fft_r2c_gpu_init(plan, n, istat, ncol)
     integer, intent(inout) :: plan
     integer, intent(in) :: n
     integer, intent(inout) :: istat
-    istat = cufftPlan1D(plan,n,CUFFT_D2Z,1)
+    integer, intent(in) :: ncol
+    istat = cufftPlan1D(plan,n,CUFFT_D2Z,ncol)
   end subroutine fft_r2c_gpu_init
 
   !> Cuda initialisation backward transform
   !! @param plan fft plan for specific transform
   !! @param n Size of transform
   !! @param istat status flag for cuda function
-  subroutine fft_c2r_gpu_init(plan, n, istat)
+  subroutine fft_c2r_gpu_init(plan, n, istat,ncol)
     integer, intent(inout) :: plan
     integer, intent(in) :: n
     integer, intent(inout) :: istat
-    istat = cufftPlan1D(plan,n,CUFFT_Z2D,1)
+    integer, intent(in) :: ncol
+    istat = cufftPlan1D(plan,n,CUFFT_Z2D,ncol)
   end subroutine fft_c2r_gpu_init
 
   !> Carry out forward fft with cuda
@@ -471,15 +473,16 @@ contains
   !! @param out Transformed data
   !! @param nt Size of transform
   !! @param plan fft plan for specific transform
-  subroutine fft_r2c_gpu(in, out, nt, plan)
-    double precision, intent(inout) :: in(nt)
-    complex*16, intent(inout) :: out(nt/2+1)
+  subroutine fft_r2c_gpu(in, out, nt, plan, ncol)
+    double precision, intent(inout) :: in(nt,ncol)
+    complex*16, intent(inout) :: out(nt/2+1,ncol)
     integer, intent(in) :: nt !< size of transform
     integer, intent(inout) :: plan
-    double precision, allocatable, device, dimension(:) :: in_d
-    complex*16, allocatable, device, dimension(:) :: out_d
+    integer, intent(in) :: ncol
+    double precision, allocatable, device, dimension(:,:) :: in_d
+    complex*16, allocatable, device, dimension(:,:) :: out_d
     integer :: istat
-    allocate(in_d(nt), out_d(nt/2+1))
+    allocate(in_d(nt,ncol), out_d(nt/2+1,ncol))
     in_d = in
     istat = cufftExecD2Z(plan, in_d, out_d)
     out = out_d
@@ -490,15 +493,16 @@ contains
   !! @param out Transformed data
   !! @param nt Size of transform
   !! @param plan fft plan for specific transform
-  subroutine fft_c2r_gpu(in, out, nt, plan)
+  subroutine fft_c2r_gpu(in, out, nt, plan, ncol)
     integer, intent(inout) :: plan
-    complex*16, intent(inout) :: in(nt/2+1)
-    double precision, intent(inout) :: out(nt)
+    complex*16, intent(inout) :: in(nt/2+1,ncol)
+    double precision, intent(inout) :: out(nt,ncol)
     integer, intent(in) :: nt !< size of transform
-    complex*16, allocatable, device, dimension(:) :: in_d
-    double precision, allocatable, device, dimension(:) :: out_d
+    integer, intent(in) :: ncol
+    complex*16, allocatable, device, dimension(:,:) :: in_d
+    double precision, allocatable, device, dimension(:,:) :: out_d
     integer :: istat
-    allocate(in_d(nt/2+1), out_d(nt))
+    allocate(in_d(nt/2+1,ncol), out_d(nt,ncol))
     in_d = in
     istat = cufftExecZ2D(plan, in_d, out_d)
     out = out_d/nt
@@ -515,7 +519,7 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), contiguous, pointer, intent(inout) :: source_data
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(inout) :: transformed_data
     integer, intent(in) :: row_size, num_rows, plan_id
-    integer :: i, j, istat, ncols
+    integer :: i, j, istat, ncols, ncol_tot, nbatches, off_start, off_end
     double precision :: tstart, tstop
     ncols=size(source_data,2)
 
@@ -533,13 +537,11 @@ contains
 #else
     ! create plan if not already created
     if (.not. plan_defined(plan_id)) then
-      call fft_r2c_gpu_init(plans(plan_id),row_size, istat)
+      call fft_r2c_gpu_init(plans(plan_id),row_size, istat, ncols)
       plan_defined(plan_id) = .true.
     end if
     do i=1,size(source_data,3)
-      do j=1, size(source_data,2)
-        call fft_r2c_gpu(source_data(:,j,i),transformed_data(:,j,i),row_size, plans(plan_id))
-      enddo
+      call fft_r2c_gpu(source_data(:,1:ncols,i),transformed_data(:,1:ncols,i),row_size, plans(plan_id),ncols)
     enddo
 #endif
 
@@ -577,13 +579,11 @@ contains
 #else
     ! create plan if not already created
     if (.not. plan_defined(plan_id)) then
-      call fft_c2r_gpu_init(plans(plan_id),row_size, istat)
+      call fft_c2r_gpu_init(plans(plan_id),row_size, istat,ncols)
       plan_defined(plan_id) = .true.
     end if
     do i=1,size(source_data,3)
-      do j=1,size(source_data,2)
-        call fft_c2r_gpu(source_data(:,j,i),transformed_data(:,j,i),row_size, plans(plan_id))
-      enddo
+      call fft_c2r_gpu(source_data(:,1:ncols,i),transformed_data(:,1:ncols,i),row_size, plans(plan_id),ncols)
     enddo
 #endif
     tstop = mpi_wtime()
