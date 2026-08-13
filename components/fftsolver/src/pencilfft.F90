@@ -448,6 +448,7 @@ contains
   !! @param plan fft plan for specific transform
   !! @param n Size of transform
   !! @param istat status flag for cuda function
+  !! @param ncol number of batched transforms to carry out
   subroutine fft_r2c_gpu_init(plan, n, istat, ncol)
     integer, intent(inout) :: plan
     integer, intent(in) :: n
@@ -460,6 +461,7 @@ contains
   !! @param plan fft plan for specific transform
   !! @param n Size of transform
   !! @param istat status flag for cuda function
+  !! @param ncol number of batched transforms to carry out
   subroutine fft_c2r_gpu_init(plan, n, istat,ncol)
     integer, intent(inout) :: plan
     integer, intent(in) :: n
@@ -469,14 +471,15 @@ contains
   end subroutine fft_c2r_gpu_init
 
   !> Carry out forward fft with cuda
-  !! @param in Data to transform
-  !! @param out Transformed data
+  !! @param in Data to transform (on host)
+  !! @param out Transformed data (on host)
   !! @param nt Size of transform
   !! @param plan fft plan for specific transform
+  !! @param ncol number of batched transforms to carry out
   subroutine fft_r2c_gpu(in, out, nt, plan, ncol)
     double precision, intent(inout) :: in(nt,ncol)
     complex*16, intent(inout) :: out(nt/2+1,ncol)
-    integer, intent(in) :: nt !< size of transform
+    integer, intent(in) :: nt
     integer, intent(inout) :: plan
     integer, intent(in) :: ncol
     double precision, allocatable, device, dimension(:,:) :: in_d
@@ -489,15 +492,16 @@ contains
   end subroutine fft_r2c_gpu
 
   !> Carry out backward fft with cuda
-  !! @param in Data to transform
-  !! @param out Transformed data
+  !! @param in Data to transform (on host)
+  !! @param out Transformed data (on host)
   !! @param nt Size of transform
   !! @param plan fft plan for specific transform
+  !! @param ncol number of batched transforms to carry out
   subroutine fft_c2r_gpu(in, out, nt, plan, ncol)
     integer, intent(inout) :: plan
     complex*16, intent(inout) :: in(nt/2+1,ncol)
     double precision, intent(inout) :: out(nt,ncol)
-    integer, intent(in) :: nt !< size of transform
+    integer, intent(in) :: nt
     integer, intent(in) :: ncol
     complex*16, allocatable, device, dimension(:,:) :: in_d
     double precision, allocatable, device, dimension(:,:) :: out_d
