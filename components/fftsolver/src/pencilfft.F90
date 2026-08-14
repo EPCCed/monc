@@ -486,16 +486,17 @@ contains
   !! @param nt Size of transform
   !! @param plan fft plan for specific transform
   !! @param ncol number of batched transforms to carry out
-  subroutine fft_r2c_gpu(in, out, nt, plan, ncol)
-    double precision, intent(inout) :: in(nt,ncol)
-    complex*16, intent(inout) :: out(nt/2+1,ncol)
+  subroutine fft_r2c_gpu(in, out, nt, plan)
+    double precision, intent(inout) :: in(:,:,:)
+    complex*16, intent(inout) :: out(:,:,:)
     integer, intent(in) :: nt
     integer, intent(inout) :: plan
-    integer, intent(in) :: ncol
-    double precision, allocatable, device, dimension(:,:) :: in_d
-    complex*16, allocatable, device, dimension(:,:) :: out_d
-    integer :: istat
-    allocate(in_d(nt,ncol), out_d(nt/2+1,ncol))
+    double precision, allocatable, device, dimension(:,:,:) :: in_d
+    complex*16, allocatable, device, dimension(:,:,:) :: out_d
+    integer :: istat, n2, n3
+    n2=size(in,2)
+    n3=size(in,3)
+    allocate(in_d(nt,n2,n3), out_d(nt/2+1,n2,n3))
     in_d = in
     istat = cufftExecD2Z(plan, in_d, out_d)
     out = out_d
@@ -507,16 +508,17 @@ contains
   !! @param nt Size of transform
   !! @param plan fft plan for specific transform
   !! @param ncol number of batched transforms to carry out
-  subroutine fft_c2r_gpu(in, out, nt, plan, ncol)
+  subroutine fft_c2r_gpu(in, out, nt, plan)
     integer, intent(inout) :: plan
-    complex*16, intent(inout) :: in(nt/2+1,ncol)
-    double precision, intent(inout) :: out(nt,ncol)
+    complex*16, intent(inout) :: in(:,:,:)
+    double precision, intent(inout) :: out(:,:,:)
     integer, intent(in) :: nt
-    integer, intent(in) :: ncol
-    complex*16, allocatable, device, dimension(:,:) :: in_d
-    double precision, allocatable, device, dimension(:,:) :: out_d
-    integer :: istat
-    allocate(in_d(nt/2+1,ncol), out_d(nt,ncol))
+    complex*16, allocatable, device, dimension(:,:,:) :: in_d
+    double precision, allocatable, device, dimension(:,:,:) :: out_d
+    integer :: istat, n2, n3
+    n2=size(in,2)
+    n3=size(in,3)
+    allocate(in_d(nt/2+1,n2,n3), out_d(nt,n2,n3))
     in_d = in
     istat = cufftExecZ2D(plan, in_d, out_d)
     out = out_d/nt
@@ -556,7 +558,7 @@ contains
       call fft_r2c_gpu_init(plans(plan_id),row_size, istat, ncols)
       plan_defined(plan_id) = .true.
     end if
-    call fft_r2c_gpu(source_data(:,1:ncols2,1:ncols3),transformed_data(:,1:ncols2,1:ncols3),row_size, plans(plan_id),ncols)
+    call fft_r2c_gpu(source_data(:,1:ncols2,1:ncols3),transformed_data(:,1:ncols2,1:ncols3),row_size, plans(plan_id))
 #endif
 
     tstop = mpi_wtime()
@@ -598,7 +600,7 @@ contains
       call fft_c2r_gpu_init(plans(plan_id),row_size, istat,ncols)
       plan_defined(plan_id) = .true.
     end if
-    call fft_c2r_gpu(source_data(:,1:ncols2,1:ncols3),transformed_data(:,1:ncols2,1:ncols3),row_size, plans(plan_id),ncols)
+    call fft_c2r_gpu(source_data(:,1:ncols2,1:ncols3),transformed_data(:,1:ncols2,1:ncols3),row_size, plans(plan_id))
 #endif
     tstop = mpi_wtime()
 
