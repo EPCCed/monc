@@ -116,7 +116,7 @@ contains
   subroutine finalise_pencil_fft(monc_communicator)
     integer, intent(in) :: monc_communicator
     integer :: ierr, i
-    double precision :: t_per_forward, t_per_backward
+    real(kind=DEFAULT_PRECISION) :: t_per_forward, t_per_backward
 
     t_per_forward = tforward/nforward
     t_per_backward= tback/nback
@@ -487,11 +487,11 @@ contains
   !! @param plan fft plan for specific transform
   !! @param ncol number of batched transforms to carry out
   subroutine fft_r2c_gpu(in, out, nt, plan)
-    double precision, intent(inout) :: in(:,:,:)
+    real(kind=DEFAULT_PRECISION), intent(inout) :: in(:,:,:)
     complex*16, intent(inout) :: out(:,:,:)
     integer, intent(in) :: nt
     integer, intent(inout) :: plan
-    double precision, allocatable, device, dimension(:,:,:) :: in_d
+    real(kind=DEFAULT_PRECISION), allocatable, device, dimension(:,:,:) :: in_d
     complex*16, allocatable, device, dimension(:,:,:) :: out_d
     integer :: istat, n2, n3
     n2=size(in,2)
@@ -511,7 +511,7 @@ contains
   subroutine fft_c2r_gpu(in, out, nt, plan)
     integer, intent(inout) :: plan
     complex*16, intent(inout) :: in(:,:,:)
-    double precision, intent(inout) :: out(:,:,:)
+    real(kind=DEFAULT_PRECISION), intent(inout) :: out(:,:,:)
     integer, intent(in) :: nt
     complex*16, allocatable, device, dimension(:,:,:) :: in_d
     double precision, allocatable, device, dimension(:,:,:) :: out_d
@@ -536,7 +536,7 @@ contains
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(inout) :: transformed_data
     integer, intent(in) :: row_size, num_rows, plan_id
     integer :: i, j, istat, ncols, ncols2, ncols3
-    double precision :: tstart, tstop
+    real(kind=DEFAULT_PRECISION) :: tstart, tstop
     ncols2=size(source_data,2)
     ncols3=size(source_data,3)
     ncols=size(source_data,2)* size(source_data,3)
@@ -578,7 +578,7 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), contiguous, pointer, intent(inout) :: transformed_data
     integer, intent(in) :: row_size, num_rows, plan_id
     integer :: i,j, istat, ncols, ncols2,ncols3
-    double precision :: tstart, tstop
+    real(kind=DEFAULT_PRECISION) :: tstart, tstop
     ncols2=size(source_data,2)
     ncols3=size(source_data,3)
     ncols=size(source_data,2)* size(source_data,3)
