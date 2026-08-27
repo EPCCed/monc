@@ -50,7 +50,7 @@ module pencil_fft_mod
   
   !counters for number of times the fft routines are called and the time spent in them
   integer :: nforward, nback
-  double precision :: tforward, tback
+  real(kind=DEFAULT_PRECISION) :: tforward, tback
 
   ! plans for cufft/rocfft
   integer :: plans(4)=0
@@ -514,7 +514,7 @@ contains
     real(kind=DEFAULT_PRECISION), intent(inout) :: out(:,:,:)
     integer, intent(in) :: nt
     complex*16, allocatable, device, dimension(:,:,:) :: in_d
-    double precision, allocatable, device, dimension(:,:,:) :: out_d
+    real(kind=DEFAULT_PRECISION), allocatable, device, dimension(:,:,:) :: out_d
     integer :: istat, n2, n3
     n2=size(in,2)
     n3=size(in,3)
