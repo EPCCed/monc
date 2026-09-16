@@ -287,12 +287,8 @@ contains
       current_state%local_grid%size(Y_INDEX)=y_size
       current_state%parallel%my_coords(Y_INDEX)=0
       current_state%parallel%dim_sizes(Y_INDEX)=1
-      current_state%local_grid%start(X_INDEX)=dimension_division*current_state%parallel%my_rank+merge(&
-           dimension_extra, current_state%parallel%my_rank, dimension_extra .lt. current_state%parallel%my_rank) + 1
-      current_state%local_grid%end(X_INDEX)=(current_state%local_grid%start(X_INDEX)-1) + dimension_division + merge(&
-           1, 0, current_state%parallel%my_rank .lt. dimension_extra)
-      current_state%local_grid%size(X_INDEX)=(current_state%local_grid%end(X_INDEX) - current_state%local_grid%start(X_INDEX)) + 1
-      current_state%parallel%my_coords(X_INDEX) = current_state%parallel%my_rank
+      call apply_dimension_bounds(current_state, X_INDEX, split_size, current_state%parallel%processes, &
+            current_state%parallel%my_rank)
       current_state%parallel%dim_sizes(X_INDEX) = current_state%parallel%processes
       current_state%local_grid%neighbours(Y_INDEX,:) = current_state%parallel%my_rank
       ! Currently assume same PID in single direction (TODO: relax this restraint)
@@ -315,12 +311,8 @@ contains
       current_state%local_grid%size(X_INDEX)=x_size
       current_state%parallel%my_coords(X_INDEX)=0
       current_state%parallel%dim_sizes(X_INDEX)=1
-      current_state%local_grid%start(Y_INDEX)=dimension_division*current_state%parallel%my_rank+merge(&
-           dimension_extra, current_state%parallel%my_rank, dimension_extra .lt. current_state%parallel%my_rank) + 1
-      current_state%local_grid%end(Y_INDEX)=(current_state%local_grid%start(Y_INDEX)-1) + dimension_division + merge(&
-           1, 0, current_state%parallel%my_rank .lt. dimension_extra)
-      current_state%local_grid%size(Y_INDEX)=(current_state%local_grid%end(Y_INDEX) - current_state%local_grid%start(Y_INDEX)) + 1
-      current_state%parallel%my_coords(Y_INDEX)=current_state%parallel%my_rank
+      call apply_dimension_bounds(current_state, Y_INDEX, split_size, current_state%parallel%processes, &
+            current_state%parallel%my_rank)
       current_state%parallel%dim_sizes(Y_INDEX) = current_state%parallel%processes
       current_state%local_grid%neighbours(X_INDEX,:) = current_state%parallel%my_rank
       current_state%local_grid%neighbours(Y_INDEX,1:2) = merge(current_state%parallel%my_rank, current_state%parallel%processes, &
