@@ -129,7 +129,9 @@ contains
     integer :: i
 
     current_state%diagnostic_sample_timestep = .false.
-    current_state%sampling(:)%active = .false.
+    ! %sampling is allocated by the iobridge from the intervals the IO server reports; without the IO server it is
+    ! unallocated and there is nothing to sample on, so it must not be touched (see also sampling_count)
+    if (allocated(current_state%sampling)) current_state%sampling(:)%active = .false.
     current_state%radiation_timestep = .false.  ! for computation timing under time_basis
 
     if (.not. current_state%only_compute_on_sample_timestep) then
@@ -143,7 +145,7 @@ contains
     if (current_state%time_basis) then
       ! enable calculations and sampling at specified step only 
       ! (at sampling time interval, which is also an output or write interval)
-      do i=1, size(current_state%sampling)
+      do i=1, sampling_count(current_state)
         if (current_state%timestep .eq. current_state%sampling(i)%next_step) then
           if (current_state%sampling(i)%radiation) then
             ! Only possible when socrates_enabled and radiation_interval .gt. 0 (iobridge)
@@ -163,7 +165,7 @@ contains
              current_state%radiation_timestep = .true.
       end if 
       ! enable diagnostic calculation and sampling on the sampling timestep interval.
-      do i=1,size(current_state%sampling)
+      do i=1,sampling_count(current_state)
         if (mod(current_state%timestep, current_state%sampling(i)%interval) == 0) then
           current_state%diagnostic_sample_timestep = .true.
           current_state%sampling(i)%active = .true.
@@ -171,5 +173,18 @@ contains
       end do
     end if
   end subroutine handle_sampling
+
+  !> The number of sampling intervals, or zero when the IO server has not supplied any (see
+  !! handle_sampling).
+  !! @param current_state The current model state
+  integer function sampling_count(current_state)
+    type(model_state_type), intent(inout) :: current_state
+
+    if (allocated(current_state%sampling)) then
+      sampling_count=size(current_state%sampling)
+    else
+      sampling_count=0
+    end if
+  end function sampling_count
 
 end module timestepper_mod
