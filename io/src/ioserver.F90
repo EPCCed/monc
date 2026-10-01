@@ -20,7 +20,7 @@ module io_server_mod
   use writer_field_manager_mod, only : initialise_writer_field_manager, finalise_writer_field_manager, &
        provide_monc_data_to_writer_federator
   use collections_mod, only : hashset_type, hashmap_type, map_type, iterator_type, c_get_integer, c_put_integer, c_is_empty, &
-       c_remove, c_add_string, c_integer_at, c_free, c_get_iterator, c_has_next, c_next_mapentry
+       c_remove, c_add_string, c_integer_at, c_free, c_get_iterator, c_has_next, c_next_mapentry, c_contains
   use conversions_mod, only : conv_to_string
   use string_utils_mod, only : replace_character
   use io_server_client_mod, only : REGISTER_COMMAND, DEREGISTER_COMMAND, INTER_IO_COMMUNICATION, DATA_COMMAND_START, DATA_TAG, &
@@ -55,6 +55,8 @@ module io_server_mod
   integer, dimension(:,:), allocatable :: sample_output_pairs
 
   integer, volatile :: monc_registration_lock
+  !> Upper bound on 100us waits for a MONC's registration to complete before its first data message is processed
+  integer, parameter :: REGISTRATION_WAIT_LIMIT=600000
 
   public io_server_run
 contains
@@ -313,11 +315,31 @@ contains
   subroutine pull_back_data_message_and_handle(source, data_set)
     integer, intent(in) :: source, data_set
 
-    integer :: specific_monc_data_type, specific_monc_buffer_size, recv_count, monc_location, matched_datadefn_index
+    integer :: specific_monc_data_type, specific_monc_buffer_size, recv_count, monc_location, matched_datadefn_index, waited
     character, dimension(:), allocatable :: data_buffer
+    logical :: registered
 
-    call check_thread_status(forthread_rwlock_rdlock(monc_registration_lock))
-    monc_location=get_monc_location(io_configuration, source)
+    ! Registration of this MONC runs on a pool thread and may still be in progress when its first data message arrives
+    ! (the MONC only needs the configuration reply, sent at the start of registration, before it starts sending data).
+    ! Wait, yielding, until registration has completed rather than failing the lookups below. The compute rank is
+    ! blocked in its synchronous send meanwhile, so nothing is lost or reordered.
+    waited=0
+    do
+      call check_thread_status(forthread_rwlock_rdlock(monc_registration_lock))
+      registered=c_contains(io_configuration%monc_to_index, conv_to_string(source))
+      if (registered) then
+        monc_location=get_monc_location(io_configuration, source)
+        registered=io_configuration%registered_moncs(monc_location)%registration_complete
+      end if
+      if (registered) exit
+      call check_thread_status(forthread_rwlock_unlock(monc_registration_lock))
+      if (waited .ge. REGISTRATION_WAIT_LIMIT) then
+        call log_log(LOG_ERROR, "Data arrived from MONC "//trim(conv_to_string(source))//&
+             " but its registration with this IO server has not completed")
+      end if
+      call pause_for_mpi_interleaving()
+      waited=waited+1
+    end do
 
     specific_monc_data_type=c_get_integer(io_configuration%registered_moncs(monc_location)%registered_monc_types, &
          conv_to_string(data_set))
@@ -413,9 +435,9 @@ contains
     end if
 
     io_configuration%active_moncs=io_configuration%active_moncs+1
-    call check_thread_status(forthread_rwlock_unlock(monc_registration_lock))
-
+    ! monc_to_index is a plain (unlocked) map and several registrations run concurrently, so insert under the lock
     call c_put_integer(io_configuration%monc_to_index, conv_to_string(source), this_monc_index)
+    call check_thread_status(forthread_rwlock_unlock(monc_registration_lock))
 
     call check_thread_status(forthread_mutex_init(io_configuration%registered_moncs(this_monc_index)%active_mutex, -1))
     call check_thread_status(forthread_cond_init(&
@@ -431,6 +453,10 @@ contains
     ! Wait for configuration to have been sent to registree
     call waitall_for_mpi_requests(configuration_send_request, 3)
     call init_data_definition(source, io_configuration%registered_moncs(this_monc_index))
+    ! Only now are the MPI types and buffer sizes for this MONC in place; release any data message waiting on them
+    call check_thread_status(forthread_rwlock_wrlock(monc_registration_lock))
+    io_configuration%registered_moncs(this_monc_index)%registration_complete=.true.
+    call check_thread_status(forthread_rwlock_unlock(monc_registration_lock))
   end subroutine handle_monc_registration
 
   !> Sends the data and field descriptions to the MONC process that just registered with the IO server
@@ -484,12 +510,15 @@ contains
 
       monc_defn%definition_names(i)=io_configuration%data_definitions(i)%name
     end do
+    ! Concurrent registrations must not both take this branch or race on the shared dimension_sizing map
+    call check_thread_status(forthread_rwlock_wrlock(monc_registration_lock))
     if (.not. initialised_present_data) then
       initialised_present_data=.true.
       field_found=get_data_description_from_name(data_description, NUMBER_Q_INDICIES_KEY, field_description)
       call c_put_integer(io_configuration%dimension_sizing, "active_q_indicies", field_description%dim_sizes(1))
       call register_present_field_names_to_federators(data_description, recv_count)
     end if
+    call check_thread_status(forthread_rwlock_unlock(monc_registration_lock))
     call get_monc_information_data(source)
   end subroutine init_data_definition
 

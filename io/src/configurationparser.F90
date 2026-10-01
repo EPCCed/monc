@@ -45,6 +45,8 @@ module configuration_parser_mod
      character(len=STRING_LENGTH), dimension(:), allocatable :: definition_names
      integer :: active_threads, active_mutex, deactivate_condition_variable, local_dim_sizes(3), local_dim_starts(3), &
           local_dim_ends(3), source_id
+     !> Set (under the registration lock) once handle_monc_registration has finished for this MONC; the data path waits on it
+     logical :: registration_complete=.false.
   end type io_configuration_registered_monc_type  
 
   !> Configuration associated with the representation of a specific data field
