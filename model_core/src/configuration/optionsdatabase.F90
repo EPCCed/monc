@@ -66,8 +66,10 @@ module optionsdatabase_mod
     type(hashmap_type), intent(inout) :: options_database
     integer, intent(in) :: i
     class(*), pointer :: options_value_at
+    class(*), pointer :: generic
 
-    options_value_at=>c_generic_at(options_database, i)
+    generic=>c_generic_at(options_database, i)
+    options_value_at=>generic
   end function options_value_at
 
   !> Determines whether a specific key is in the database

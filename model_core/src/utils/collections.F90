@@ -4,6 +4,11 @@
 !! MONC. Currently a list, map, stack and queue all with appropriate functionality are provided.
 !! The core of all collections is currently a doubly linked list, this is abstracted to allow for the
 !! internal structure of collections to change without requiring any user code modifications.
+!!
+!! Compiler note: a function whose result is class(*), pointer must never pointer-assign that result directly from
+!! another function reference (result=>f(...)). gfortran 13 and 14 mis-compile this (the dynamic type's _copy is called on
+!! the stack descriptors, smashing the frame); assign to a local class(*), pointer first and then to the result.
+!! misc/tests/gfortran_class_pointer_result.F90 reproduces it; misc/tests/check_class_pointer_result_pattern.sh enforces this.
 module collections_mod
   use datadefn_mod, only : STRING_LENGTH, DEFAULT_PRECISION
   use conversions_mod, only : conv_to_generic, generic_to_double_real, conv_to_integer, conv_to_string, conv_to_logical, &
@@ -1847,6 +1852,7 @@ contains
     type(hashmap_type), intent(inout) :: specificmap
     integer, intent(in) :: index
     class(*), pointer :: hashmap_getnode_atindex
+    class(*), pointer :: generic
 
     integer :: i, current_size, prev
 
@@ -1858,7 +1864,8 @@ contains
     do i=1, hash_size
       current_size=current_size+list_size(specificmap%map_ds(i))
       if (current_size .ge. index) then
-        hashmap_getnode_atindex=>list_get_generic(specificmap%map_ds(i), index-prev)        
+        generic=>list_get_generic(specificmap%map_ds(i), index-prev)
+        hashmap_getnode_atindex=>generic
         return
       end if
       prev=current_size
@@ -2338,8 +2345,10 @@ contains
   function stack_pop_generic(specificstack)
     type(stack_type), intent(inout) :: specificstack
     class(*), pointer :: stack_pop_generic
+    class(*), pointer :: generic
 
-    stack_pop_generic=>stack_get_generic(specificstack, 1)
+    generic=>stack_get_generic(specificstack, 1)
+    stack_pop_generic=>generic
     call list_remove(specificstack%stack_ds, 1)
   end function stack_pop_generic
 
@@ -2432,8 +2441,10 @@ contains
     type(stack_type), intent(inout) :: specificstack
     integer, intent(in) :: i
     class(*), pointer :: stack_get_generic
+    class(*), pointer :: generic
 
-    stack_get_generic=>list_get_generic(specificstack%stack_ds, i)
+    generic=>list_get_generic(specificstack%stack_ds, i)
+    stack_get_generic=>generic
   end function stack_get_generic
 
   !> Returns the number of elements held on the stack
@@ -2634,8 +2645,10 @@ contains
   function queue_pop_generic(specificqueue)
     type(queue_type), intent(inout) :: specificqueue
     class(*), pointer :: queue_pop_generic
+    class(*), pointer :: generic
 
-    queue_pop_generic=>queue_get_generic(specificqueue, 1)
+    generic=>queue_get_generic(specificqueue, 1)
+    queue_pop_generic=>generic
     call list_remove(specificqueue%queue_ds, 1)
   end function queue_pop_generic
 
@@ -2728,8 +2741,10 @@ contains
     type(queue_type), intent(inout) :: specificqueue
     integer, intent(in) :: i
     class(*), pointer :: queue_get_generic
+    class(*), pointer :: generic
 
-    queue_get_generic=>list_get_generic(specificqueue%queue_ds, i)
+    generic=>list_get_generic(specificqueue%queue_ds, i)
+    queue_get_generic=>generic
   end function queue_get_generic
 
   !> Returns the number of elements held in a queue
