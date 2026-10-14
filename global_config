@@ -72,32 +72,32 @@ drybl_enabled=.false.
 kidtestcase_enabled=.false.
 shallow_convection_enabled=.false.
 
-
 # Component timestepping groups
-group_names= start, subgrid, dynamics, dynamics-acc, solver, pressure-terms, last
+group_names= start, subgrid, dynamics-fork, dynamics, dynamics-join, solver, pressure-terms, last
 
 start_group_type=entire
 subgrid_group_type=column
+dynamics-fork_group_type=entire
 dynamics_group_type=column
-dynamics-acc_group_type=entire
+dynamics-join_group_type=entire
 solver_group_type=entire
 pressure-terms_group_type=column
 last_group_type=entire
 
+
 start_group_contents=clearsourceterms, stepping_direction, halo_swapper, lateral_bcs, setfluxlook
 subgrid_group_contents=lower_bc, smagorinsky
-dynamics_group_contents=kidtestcase, pw_advection, tvd_advection, th_advection, diffusion, viscosity, coriolis, buoyancy, damping, forcing, set_consistent_lowbc, socrates_couple, lwrad_exponential, simplecloud, casim, tracers, flux_budget, subgrid_profile_diagnostics, diverr, psrce, diagnostics_3d, profile_diagnostics, casim_profile_dgs, scalar_diagnostics, immersed_boundary, ib_finalise, vert_filter, stepfields
+dynamics-fork_group_contents=pw_advection_acc, tvd_advection_acc
+dynamics_group_contents=kidtestcase, pw_advection, tvd_advection, th_advection, diffusion, viscosity, coriolis, buoyancy, damping, forcing, set_consistent_lowbc, socrates_couple, lwrad_exponential, simplecloud, casim, tracers, subgrid_profile_diagnostics, diverr, psrce,  casim_profile_dgs immersed_boundary, ib_finalise, vert_filter
+dynamics-join_group_contents=stepfields, flux_budget, diagnostics_3d, profile_diagnostics, scalar_diagnostics
+solver_group_contents=mean_profiles, fftsolver, iterativesolver, cfltest
+pressure-terms_group_contents=pstep, swap_smooth
+last_group_contents=checkpointer, model_synopsis, termination_check, iobridge
 
-dynamics-acc_group_contents=pw_advection_ompt, tvd_advection_ompt
 
-solver_group_contents=pdf_analysis, mean_profiles, fftsolver, filter, iterativesolver, iterativesolver_single_prec, petsc_solver, cfltest
-pressure-terms_group_contents=pstep, swap_smooth, conditional_diagnostics_column
-last_group_contents=conditional_diagnostics_whole, checkpointer, model_synopsis, termination_check, iobridge
+initialisation_stage_ordering=decomposition, kidreader, kidtestcase, checkpointer, simplesetup, grid_manager, mean_profiles, swap_smooth, termination_check, simplecloud, casim, tracers, coriolis, buoyancy, cfltest, damping, diverr, fftsolver, filter, halo_swapper, iterativesolver, iterativesolver_single_prec, setfluxlook, lower_bc, physicsa, psrce, pw_advection, pw_advection_acc, diffusion, set_consistent_lowbc, viscosity, smagorinsky, stepfields, stepping_direction, tvd_advection, tvd_advection_acc, model_synopsis, socrates_couple, lwrad_exponential, th_advection, randomnoise, forcing, immersed_boundary, ib_finalise, vert_filter, flux_budget, diagnostics_3d, profile_diagnostics, casim_profile_dgs, conditional_diagnostics_column, conditional_diagnostics_whole, pdf_analysis, subgrid_profile_diagnostics, scalar_diagnostics, lateral_bcs, petsc_solver, pstep, iobridge
 
-# Component ordering for other stages
-
-initialisation_stage_ordering=decomposition, kidreader, kidtestcase, checkpointer, simplesetup, grid_manager, mean_profiles, swap_smooth, termination_check, simplecloud, casim, tracers, coriolis, buoyancy, cfltest, damping, diverr, fftsolver, filter, halo_swapper, iterativesolver, iterativesolver_single_prec, setfluxlook, lower_bc, physicsa, psrce, pw_advection, diffusion, set_consistent_lowbc, viscosity, smagorinsky, stepfields, stepping_direction, tvd_advection, model_synopsis, socrates_couple, lwrad_exponential, th_advection, randomnoise, forcing, immersed_boundary, ib_finalise, vert_filter, flux_budget, diagnostics_3d, profile_diagnostics, casim_profile_dgs, conditional_diagnostics_column, conditional_diagnostics_whole, pdf_analysis, subgrid_profile_diagnostics, scalar_diagnostics, lateral_bcs, petsc_solver, pstep, iobridge
-finalisation_stage_ordering=iobridge, checkpointer, diverr, fftsolver, filter, grid_manager, halo_swapper, iterativesolver, iterativesolver_single_prec, physicsa, psrce, smagorinsky, tvd_advection, socrates_couple, lwrad_exponential, model_synopsis, mean_profiles, pdf_analysis, forcing, immersed_boundary,  ib_finalise, vert_filter, stepfields, flux_budget, coriolis, buoyancy, diffusion, lower_bc, viscosity, profile_diagnostics, pw_advection, th_advection, damping, simplecloud, tracers, pstep, conditional_diagnostics_whole, conditional_diagnostics_column
+finalisation_stage_ordering=iobridge, checkpointer, diverr, fftsolver, filter, grid_manager, halo_swapper, iterativesolver, iterativesolver_single_prec, physicsa, psrce, smagorinsky, tvd_advection, tvd_advection_acc, socrates_couple, lwrad_exponential, model_synopsis, mean_profiles, pdf_analysis, forcing, immersed_boundary,  ib_finalise, vert_filter, stepfields, flux_budget, coriolis, buoyancy, diffusion, lower_bc, viscosity, profile_diagnostics, pw_advection, pw_advection_acc, th_advection, damping, simplecloud, tracers, pstep, conditional_diagnostics_whole, conditional_diagnostics_column
 
 # Control configuration
 nn_timesteps=-1

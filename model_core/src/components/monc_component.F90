@@ -24,6 +24,10 @@ module monc_component_mod
        real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: real_3d_array
        real(kind=DEFAULT_PRECISION), dimension(:,:), allocatable :: real_2d_array
        real(kind=DEFAULT_PRECISION), dimension(:), allocatable :: real_1d_array
+       real(kind=DEFAULT_PRECISION), dimension(:,:,:,:), pointer :: real_4d_array_ptr
+       real(kind=DEFAULT_PRECISION), dimension(:,:,:), pointer :: real_3d_array_ptr
+       real(kind=DEFAULT_PRECISION), dimension(:,:), pointer :: real_2d_array_ptr
+       real(kind=DEFAULT_PRECISION), dimension(:), pointer :: real_1d_array_ptr
        real(kind=DEFAULT_PRECISION) :: scalar_real
        integer :: scalar_int
     end type component_field_value_type
