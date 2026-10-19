@@ -22,6 +22,9 @@ module pencil_fft_mod
 #elif defined(ROCM)
 #endif
 #endif
+#ifdef CUDECOMP
+  use cudecomp
+#endif
   implicit none
 
 #ifndef TEST_MODE
