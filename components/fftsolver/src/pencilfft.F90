@@ -313,6 +313,56 @@ contains
     call convert_complex_to_real(buffer, real_buffer)
   end subroutine transpose_and_forward_fft_in_y
 
+#ifdef CUDECOMP
+  subroutine transpose_z_to_y_cudecomp(source_data, dest_data)
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: dest_data
+    integer :: istat
+    ! x-pointer to gpu cudecomp data
+    data_cudecomp_x_d = source_data
+    ! Use x-y instead of z-y because monc z direction is equivalent to cudecomp x direction
+    istat = cudecompTransposeXToY(handle_cudecomp, grid_desc_cudecomp, data_cudecomp_d, data_cudecomp_d, transpose_work_d, CUDECOMP_DOUBLE)
+    ! y-pointer to gpu cudecomp data
+    dest_data = data_cudecomp_y_d
+  end subroutine transpose_z_to_y_cudecomp    
+
+  subroutine transpose_y_to_x_cudecomp(source_data, dest_data)
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: dest_data
+    integer :: istat
+    ! y-pointer to gpu cudecomp data
+    data_cudecomp_y_d = source_data
+    ! Use y-z instead of y-x because monc z direction is equivalent to cudecomp x direction
+    istat = cudecompTransposeYToZ(handle_cudecomp, grid_desc_cudecomp, data_cudecomp_d, data_cudecomp_d, transpose_work_d, CUDECOMP_DOUBLE)
+    ! z-pointer to gpu cudecomp data
+    dest_data = data_cudecomp_z_d
+  end subroutine transpose_y_to_x_cudecomp    
+
+  subroutine transpose_x_to_y_cudecomp(source_data, dest_data)
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: dest_data
+    integer :: istat
+    ! z-pointer to gpu cudecomp data
+    data_cudecomp_z_d = source_data
+    ! Use z-y instead of x-y because monc z direction is equivalent to cudecomp x direction
+    istat = cudecompTransposeZToY(handle_cudecomp, grid_desc_cudecomp, data_cudecomp_d, data_cudecomp_d, transpose_work_d, CUDECOMP_DOUBLE)
+    ! y-pointer to gpu cudecomp data
+    dest_data = data_cudecomp_y_d
+  end subroutine transpose_x_to_y_cudecomp   
+
+  subroutine transpose_y_to_z_cudecomp(source_data, dest_data)
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: dest_data
+    integer :: istat
+    ! y-pointer to gpu cudecomp data
+    data_cudecomp_y_d = source_data
+    ! Use y-x instead of y-z because monc z direction is equivalent to cudecomp x direction
+    istat = cudecompTransposeYToX(handle_cudecomp, grid_desc_cudecomp, data_cudecomp_d, data_cudecomp_d, transpose_work_d, CUDECOMP_DOUBLE)
+    ! x-pointer to gpu cudecomp data
+    dest_data = data_cudecomp_x_d
+  end subroutine transpose_y_to_z_cudecomp   
+#endif
+
   !> Performs the backwards FFT in X and then transposes to Y pencil. The FFT requires complex numbers which are converted to real, 
   !! so the this real to complex operation is performed first. If n is the logical size of the FFT row, then the input
   !! size is n+2, complex number size is n/2+1 and we get n reals out.
