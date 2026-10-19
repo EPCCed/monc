@@ -59,6 +59,18 @@ module pencil_fft_mod
   integer :: plans(4)=0
   logical :: plan_defined(4)=.false.
 
+#ifdef CUDECOMP
+  type(cudecompGridDescConfig) :: config_cudecomp
+  type(cudecompHandle) :: handle_cudecomp
+  type(cudecompGridDesc) :: grid_desc_cudecomp
+  type(cudecompPencilInfo) :: pinfo_x, pinfo_y, pinfo_z
+  real(real64), allocatable :: data_cudecomp(:)
+  real(real64), target, allocatable, device :: data_cudecomp_d(:)
+  integer(8) :: data_num_elements
+  integer(8) :: transpose_work_num_elements
+  real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: transpose_work_d(:)
+  real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: data_cudecomp_x_d(:,:,:), data_cudecomp_y_d(:,:,:), data_cudecomp_z_d(:,:,:)
+#endif
 
 contains
 
@@ -107,6 +119,10 @@ contains
     initialise_pencil_fft=z_from_y_transposition%my_pencil_size
 
     call log_master_newline()
+
+#ifdef CUDECOMP
+    call initialise_cudecomp(current_state)
+#endif
     
     nforward = 0
     nback = 0
@@ -114,6 +130,56 @@ contains
     tforward = 0.d0
     tback = 0d0
   end function initialise_pencil_fft
+
+#ifdef CUDECOMP
+  subroutine initialise_cudecomp(current_state)
+    type(model_state_type), intent(inout) :: current_state
+    integer :: istat, p_rows, p_cols, ierr
+    ierr = cudaSetDevice(0)    
+    istat = cudecompInit(handle_cudecomp, current_state%parallel%monc_communicator)
+    istat = cudecompGridDescConfigSetDefaults(config_cudecomp)
+    !call CHECK_CUDECOMP_EXIT(istat)
+    config_cudecomp%pdims = [current_state%parallel%dim_sizes(Y_INDEX), current_state%parallel%dim_sizes(X_INDEX)]
+    !Required?
+    ! config_cudecomp%rank_order = CUDECOMP_RANK_ORDER_COL_MAJOR
+    config_cudecomp%gdims = [current_state%global_grid%size(Z_INDEX), current_state%global_grid%size(Y_INDEX),current_state%global_grid%size(X_INDEX)]
+    config_cudecomp%transpose_comm_backend = CUDECOMP_TRANSPOSE_COMM_MPI_P2P
+    config_cudecomp%transpose_axis_contiguous = [.true., .true., .true.]
+    istat = cudecompGridDescCreate(handle_cudecomp, grid_desc_cudecomp, config_cudecomp)
+    !call CHECK_CUDECOMP_EXIT(istat)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    ! Get X-pencil information (with halo elements)
+    istat = cudecompGetPencilInfo(handle_cudecomp, grid_desc_cudecomp, pinfo_x, 1)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    ! Get Y-pencil information
+    istat = cudecompGetPencilInfo(handle_cudecomp, grid_desc_cudecomp, pinfo_y, 2)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    ! Get Z-pencil information
+    istat = cudecompGetPencilInfo(handle_cudecomp, grid_desc_cudecomp, pinfo_z, 3)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    data_num_elements = max(pinfo_x%size, pinfo_y%size, pinfo_z%size)
+
+    ! Allocate device buffer
+    allocate(data_cudecomp_d(data_num_elements))
+
+    ! Allocate host buffer
+    allocate(data_cudecomp(data_num_elements))
+    istat = cudecompGetTransposeWorkspaceSize(handle_cudecomp, grid_desc_cudecomp, transpose_work_num_elements)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    istat = cudecompMalloc(handle_cudecomp, grid_desc_cudecomp, transpose_work_d, transpose_work_num_elements)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    data_cudecomp_x_d(1:pinfo_x%shape(1), 1:pinfo_x%shape(2), 1:pinfo_x%shape(3)) => data_cudecomp_d(:)
+    data_cudecomp_y_d(1:pinfo_y%shape(1), 1:pinfo_y%shape(2), 1:pinfo_y%shape(3)) => data_cudecomp_d(:)
+    data_cudecomp_z_d(1:pinfo_z%shape(1), 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecomp_d(:)
+    
+  end subroutine initialise_cudecomp
+#endif
 
   !> Cleans up allocated buffer memory
   subroutine finalise_pencil_fft(monc_communicator)
@@ -151,15 +217,23 @@ contains
   subroutine perform_forward_3dfft(current_state, source_data, target_data)
     type(model_state_type), target, intent(inout) :: current_state
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(out) :: target_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: target_data !< allocated?
    
     call transpose_and_forward_fft_in_y(current_state, source_data, buffer1, real_buffer1)
     call transpose_and_forward_fft_in_x(current_state, real_buffer1, buffer2, real_buffer2)
 
+#ifndef CUDECOMP
     call transpose_to_pencil(y_from_x_transposition, (/X_INDEX, Z_INDEX, Y_INDEX/), dim_x_comm, BACKWARD, &
          real_buffer2, real_buffer3)
+    
+#else
+    call transpose_x_to_y_cudecomp(real_buffer2, real_buffer3)
+    !call transpose_y_to_z_cudecomp(real_buffer3, target_data)
+#endif
     call transpose_to_pencil(z_from_y_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_y_comm, BACKWARD, &
-       real_buffer3, target_data)     
+       real_buffer3, target_data)  
+    
+      
   end subroutine perform_forward_3dfft
 
   !> Performs a backwards 3D FFT and currently results in target data which is the X, Z, Y oriented pencil
@@ -176,8 +250,12 @@ contains
 
     call transpose_to_pencil(y_from_z_2_transposition, (/Z_INDEX, Y_INDEX, X_INDEX/), dim_y_comm, FORWARD, &
        source_data, real_buffer3)
+#ifndef CUDECOMP
     call transpose_to_pencil(x_from_y_2_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_x_comm, FORWARD, &
        real_buffer3, real_buffer2)
+#else 
+    call transpose_y_to_x_cudecomp(real_buffer3, real_buffer2)
+#endif
 
     call transpose_and_backward_fft_in_x(current_state, real_buffer2, buffer2, real_buffer1)
     call transpose_and_backward_fft_in_y(current_state, real_buffer1, buffer1, target_data)
@@ -304,10 +382,14 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(out) :: real_buffer
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:),  contiguous, pointer, intent(out) :: buffer
 
+#ifndef CUDECOMP
     ! Transpose globally from Z pencil to Y pencil
     call transpose_to_pencil(y_from_z_transposition, (/Z_INDEX, Y_INDEX, X_INDEX/), dim_y_comm, FORWARD, &
        source_data, fft_in_y_buffer)
-    
+#else   
+    ! this is where we should use cudecomp to do the transpose:
+    call transpose_z_to_y_cudecomp(source_data, fft_in_y_buffer)
+#endif    
     call perform_r2c_fft(fft_in_y_buffer, buffer, y_from_z_transposition%my_pencil_size(Y_INDEX), &
          y_from_z_transposition%my_pencil_size(X_INDEX) * y_from_z_transposition%my_pencil_size(Z_INDEX), 1)
     call convert_complex_to_real(buffer, real_buffer)
@@ -373,7 +455,7 @@ contains
   subroutine transpose_and_backward_fft_in_x(current_state, source_data, buffer, real_buffer)
     type(model_state_type), target, intent(inout) :: current_state
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(out) :: real_buffer
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(inout) :: real_buffer
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(out) :: buffer
 
     call convert_real_to_complex(source_data, buffer)
@@ -381,8 +463,12 @@ contains
          x_from_y_2_transposition%my_pencil_size(Y_INDEX) * x_from_y_2_transposition%my_pencil_size(Z_INDEX), 2) 
 
     ! Transpose globally from X pencil to Y pencil
+#ifndef CUDECOMP
     call transpose_to_pencil(y_from_x_2_transposition, (/X_INDEX, Z_INDEX, Y_INDEX/), dim_x_comm, BACKWARD, &
        fft_in_x_buffer, real_buffer)
+#else
+    call transpose_x_to_y_cudecomp(fft_in_x_buffer, real_buffer)
+#endif
   end subroutine transpose_and_backward_fft_in_x
 
   !> Performs the transposition and forward FFT in the x dimension. After the FFT the complex space is converted back into
@@ -396,9 +482,13 @@ contains
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:),  contiguous, pointer, intent(out) :: buffer2
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: buffer1, buffer3
 
+#ifndef CUDECOMP
     ! Go from global Y pencil to global X pencil
     call transpose_to_pencil(x_from_y_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_x_comm, FORWARD, &
        buffer1, fft_in_x_buffer)   
+#else
+    call transpose_y_to_x_cudecomp(buffer1, fft_in_x_buffer)
+#endif
 
     call perform_r2c_fft(fft_in_x_buffer, buffer2, x_from_y_transposition%my_pencil_size(X_INDEX), &
          x_from_y_transposition%my_pencil_size(Y_INDEX) * x_from_y_transposition%my_pencil_size(Z_INDEX), 3)
@@ -416,7 +506,7 @@ contains
   subroutine transpose_and_backward_fft_in_y(current_state, source_data, buffer, real_buffer)
     type(model_state_type), target, intent(inout) :: current_state
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(out) :: real_buffer
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(inout) :: real_buffer
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer, intent(out) :: buffer
 
     call convert_real_to_complex(source_data, buffer)
@@ -425,8 +515,12 @@ contains
          y_from_x_2_transposition%my_pencil_size(X_INDEX) * y_from_x_2_transposition%my_pencil_size(Z_INDEX), 4)
 
     ! Go from global Y pencil to global Z pencil
+#ifndef CUDECOMP
     call transpose_to_pencil(z_from_y_2_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_y_comm, BACKWARD, &
        fft_in_y_buffer, real_buffer)
+#else
+    call transpose_y_to_z_cudecomp(fft_in_y_buffer, real_buffer)
+#endif
   end subroutine transpose_and_backward_fft_in_y
 
   !> Transposes globally to a new pencil decomposition. This goes from the source dimensions a,b,c to b,c,a (forwards) or c,a,b
