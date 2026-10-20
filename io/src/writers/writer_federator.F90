@@ -37,7 +37,7 @@ module writer_federator_mod
   use io_server_state_reader_mod, only : reactivate_writer_federator_state
   use grids_mod, only : Z_INDEX, Y_INDEX, X_INDEX
   use optionsdatabase_mod, only : options_get_logical, options_get_integer
-  use mpi, only : MPI_INT, MPI_MAX
+  use mpi, only : MPI_INT, MPI_MAX, MPI_IN_PLACE
   use mpi_communication_mod, only : lock_mpi, unlock_mpi
   implicit none
 
@@ -2002,8 +2002,11 @@ contains
           call c_add_generic(field_to_write_information%collective_descriptors, generic, .false.)
       end if
     end do
+    ! The non-blocking allreduce may read its send buffer after this routine has returned, so the send buffer must not be
+    ! a local variable: seed the (heap resident) result with the local value and reduce in place
+    field_to_write_information%max_num_collective_writes=number_distinct_writes
     call lock_mpi()
-    call mpi_iallreduce(number_distinct_writes, field_to_write_information%max_num_collective_writes, 1, MPI_INT, MPI_MAX, &
+    call mpi_iallreduce(MPI_IN_PLACE, field_to_write_information%max_num_collective_writes, 1, MPI_INT, MPI_MAX, &
          io_configuration%io_communicator, field_to_write_information%max_num_collective_writes_request_handle, ierr)
     call unlock_mpi()
   end subroutine initialise_contiguous_data_regions
