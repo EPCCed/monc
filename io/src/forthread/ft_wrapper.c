@@ -9,7 +9,39 @@
  * or systems that also implement optional POSIX threads APIs
  */
 
+#include <stdint.h>
 #include "ft_wrapper.h"
+
+/*
+ * Look up the object behind an id while holding the table's mutex.
+ *
+ * The id tables grow by realloc in the *_init routines (under the table mutex), so reading
+ * data[id] without that mutex races with a concurrent init: the pointer array may have moved
+ * and the reader sees a stale or freed array (FT_EINVALID on a valid id, or a segfault). The
+ * objects the table points to never move, so a pointer fetched under the mutex stays valid
+ * after it is released. The pthread call itself is made after release: a blocking lock or
+ * wait must not hold the table mutex, or every other forthread call (including the unlock
+ * that would wake it) would stall behind it.
+ *
+ * Returns NULL for an invalid id.
+ */
+static void *table_get(array_t *arr, int id) {
+  void *obj = NULL;
+  pthread_mutex_lock(&(arr->mutex));
+  if (is_valid(arr,id))
+    obj = arr->data[id];
+  pthread_mutex_unlock(&(arr->mutex));
+  return obj;
+}
+
+static volatile void *vtable_get(varray_t *arr, int id) {
+  volatile void *obj = NULL;
+  pthread_mutex_lock(&(arr->mutex));
+  if (vis_valid(arr,id))
+    obj = arr->data[id];
+  pthread_mutex_unlock(&(arr->mutex));
+  return obj;
+}
 
 /*
  * Forthreads initialization routine
@@ -65,12 +97,13 @@ void thread_create(int *thread_id, int *attr_id,
     return;
   }
   
+  pthread_mutex_lock(&(threads->mutex));
+
   if (!is_valid(threads,*thread_id)) {
+    pthread_mutex_unlock(&(threads->mutex));
     *info = FT_EINVALID;
     return;
   }
-  
-  pthread_mutex_lock(&(threads->mutex));
 
   if (*attr_id == -1) {
     // TODO: This should be revisited in the future.
@@ -112,26 +145,30 @@ void thread_detach(int *thread_id, int *info) {
     return;
   }
 
-  if (!is_valid(threads,*thread_id)) {
+  pthread_t *obj = (pthread_t*)table_get(threads,*thread_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_detach(*((pthread_t*)(threads->data[*thread_id])));
+  *info = pthread_detach(*obj);
 }
 
 void thread_equal(int *t1, int *t2, int *info) {
   *info = FT_OK;
 
-  if (!is_initialized)
+  pthread_t *a, *b;
+
+  if (!is_initialized) {
     *info = FT_EINIT;
-  else if (!is_valid(threads,*t1))
-    *info = FT_EINVALID;
-  else if (!is_valid(threads,*t2))
+    return;
+  }
+  a = (pthread_t*)table_get(threads,*t1);
+  b = (pthread_t*)table_get(threads,*t2);
+  if ((a == NULL) || (b == NULL))
     *info = FT_EINVALID;
   else
-    *info = pthread_equal(*((pthread_t*)(threads->data[*t1])),
-        *((pthread_t*)(threads->data[*t2])));
+    *info = pthread_equal(*a,*b);
 
 }
 
@@ -151,6 +188,7 @@ void thread_join(int *thread_id, void **value_ptr, int *info) {
 
   pthread_mutex_lock(&(threads->mutex));
   if (!is_valid(threads,*thread_id)) {
+    pthread_mutex_unlock(&(threads->mutex));
     *info = FT_EINVALID;
     return;
   }
@@ -176,12 +214,13 @@ void thread_cancel(int *thread_id, int *info) {
     return;
   }
 
-  if (!is_valid(threads,*thread_id)) {
+  pthread_t *obj = (pthread_t*)table_get(threads,*thread_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_cancel(*((pthread_t*)(threads->data[*thread_id])));
+  *info = pthread_cancel(*obj);
 
 }
 
@@ -207,12 +246,13 @@ void thread_kill(int *thread_id, int *sig, int *info) {
     return;
   }
 
-  if (!is_valid(threads,*thread_id)) {
+  pthread_t *obj = (pthread_t*)table_get(threads,*thread_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
   
-  *info = pthread_kill(*((pthread_t*)(threads->data[*thread_id])),*sig);
+  *info = pthread_kill(*obj,*sig);
 
 }
 
@@ -247,12 +287,17 @@ void thread_once_init(int *once_ctrl, int *info) {
 void thread_once(int *once_ctrl_id, void (**routine)(void), int *info) {
   *info = FT_OK;
 
-  if (!is_initialized)
+  pthread_once_t *once;
+
+  if (!is_initialized) {
     *info = FT_EINIT;
-  else if (!is_valid(once_ctrls,*once_ctrl_id))
+    return;
+  }
+  once = (pthread_once_t*)table_get(once_ctrls,*once_ctrl_id);
+  if (once == NULL)
     *info = FT_EINVALID;
   else
-    *info = pthread_once(once_ctrls->data[*once_ctrl_id],*routine);
+    *info = pthread_once(once,*routine);
 
 }
 
@@ -268,14 +313,17 @@ void thread_self(int *thread_id, int *info) {
   }
 
   tid = pthread_self();
+  pthread_mutex_lock(&(threads->mutex));
   for (i = 0; i < threads->after; i++) {
     if (threads->data[i] == NULL)
       continue;
     if (pthread_equal(tid,*((pthread_t*)(threads->data[i])))) {
       *thread_id = i;
+      pthread_mutex_unlock(&(threads->mutex));
       return;
     }
   }
+  pthread_mutex_unlock(&(threads->mutex));
   *info = FT_EINVALID;
 }
 
@@ -648,12 +696,13 @@ void thread_mutex_lock(int *mutex_id, int *info) {
     return;
   }
 
-  if (!is_valid(mutexes,*mutex_id)) {
+  pthread_mutex_t *obj = (pthread_mutex_t*)table_get(mutexes,*mutex_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_mutex_lock((pthread_mutex_t*)(mutexes->data[*mutex_id]));
+  *info = pthread_mutex_lock(obj);
 
 }
 
@@ -665,12 +714,13 @@ void thread_mutex_trylock(int *mutex_id, int *info) {
     return;
   }
 
-  if (!is_valid(mutexes,*mutex_id)) {
+  pthread_mutex_t *obj = (pthread_mutex_t*)table_get(mutexes,*mutex_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_mutex_trylock((pthread_mutex_t*)(mutexes->data[*mutex_id]));
+  *info = pthread_mutex_trylock(obj);
 
 
 }
@@ -683,12 +733,13 @@ void thread_mutex_unlock(int *mutex_id, int *info) {
     return;
   }
 
-  if (!is_valid(mutexes,*mutex_id)) {
+  pthread_mutex_t *obj = (pthread_mutex_t*)table_get(mutexes,*mutex_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_mutex_unlock((pthread_mutex_t*)(mutexes->data[*mutex_id]));
+  *info = pthread_mutex_unlock(obj);
 
 }
 
@@ -752,12 +803,13 @@ void thread_mutex_timedlock(int *mutex, struct timespec *abs_timeout, int *info)
     return;
   }
   
-  if (!is_valid(mutexes,*mutex)) {
+  pthread_mutex_t *obj = (pthread_mutex_t*)table_get(mutexes,*mutex);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_mutex_timedlock((pthread_mutex_t*)(mutexes->data[*mutex]),
+  *info = pthread_mutex_timedlock(obj,
                                  abs_timeout);
 
 }
@@ -846,14 +898,14 @@ void thread_cond_timedwait(int *cond_id, int *mutex_id, struct timespec *abstime
     return;
   }
   
-  if ((!is_valid(mutexes,*mutex_id)) || (!is_valid(conds,*cond_id))) {
+  pthread_mutex_t *mutex = (pthread_mutex_t*)table_get(mutexes,*mutex_id);
+  pthread_cond_t *cond = (pthread_cond_t*)table_get(conds,*cond_id);
+  if ((mutex == NULL) || (cond == NULL)) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_cond_timedwait((pthread_cond_t*)(conds->data[*cond_id]),
-                                 (pthread_mutex_t*)(mutexes->data[*mutex_id]),
-                                 abstime);
+  *info = pthread_cond_timedwait(cond, mutex, abstime);
 
 }
 
@@ -866,13 +918,14 @@ void thread_cond_wait(int *cond_id, int *mutex_id, int *info) {
     return;
   }
   
-  if ((!is_valid(mutexes,*mutex_id)) || (!is_valid(conds,*cond_id))) {
+  pthread_mutex_t *mutex = (pthread_mutex_t*)table_get(mutexes,*mutex_id);
+  pthread_cond_t *cond = (pthread_cond_t*)table_get(conds,*cond_id);
+  if ((mutex == NULL) || (cond == NULL)) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_cond_wait((pthread_cond_t*)(conds->data[*cond_id]),
-                            (pthread_mutex_t*)(mutexes->data[*mutex_id]));
+  *info = pthread_cond_wait(cond, mutex);
 
 }
 
@@ -885,12 +938,13 @@ void thread_cond_broadcast(int *cond_id, int *info) {
     return;
   }
   
-  if (!is_valid(conds,*cond_id)) {
+  pthread_cond_t *obj = (pthread_cond_t*)table_get(conds,*cond_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_cond_broadcast((pthread_cond_t*)(conds->data[*cond_id]));
+  *info = pthread_cond_broadcast(obj);
 
 }
 
@@ -903,12 +957,13 @@ void thread_cond_signal(int *cond_id, int *info) {
     return;
   }
   
-  if (!is_valid(conds,*cond_id)) {
+  pthread_cond_t *obj = (pthread_cond_t*)table_get(conds,*cond_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_cond_signal((pthread_cond_t*)(conds->data[*cond_id]));
+  *info = pthread_cond_signal(obj);
 
 }
 
@@ -997,12 +1052,13 @@ void thread_barrier_wait(int *barrier_id, int *info) {
     return;
   }
   
-  if (!is_valid(barriers,*barrier_id)) {
+  pthread_barrier_t *obj = (pthread_barrier_t*)table_get(barriers,*barrier_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_barrier_wait((pthread_barrier_t*)(barriers->data[*barrier_id]));
+  *info = pthread_barrier_wait(obj);
 
 }
 #endif
@@ -1085,13 +1141,13 @@ void thread_spin_lock(int *lock_id, int *info) {
   }
 
   
-  if (!vis_valid(spinlocks,*lock_id)) {
+  pthread_spinlock_t *obj = (pthread_spinlock_t*)(uintptr_t)vtable_get(spinlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  // TODO: this might need a lock
-  *info = pthread_spin_lock((pthread_spinlock_t*)(spinlocks->data[*lock_id]));
+  *info = pthread_spin_lock(obj);
   
 
 }
@@ -1105,14 +1161,13 @@ void thread_spin_trylock(int *lock_id, int *info) {
   }
 
   
-  if (!vis_valid(spinlocks,*lock_id)) {
-    pthread_mutex_unlock(&(spinlocks->mutex));
+  pthread_spinlock_t *obj = (pthread_spinlock_t*)(uintptr_t)vtable_get(spinlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  // TODO: this might need a lock
-  *info = pthread_spin_trylock((pthread_spinlock_t*)(spinlocks->data[*lock_id]));
+  *info = pthread_spin_trylock(obj);
 
 }
 
@@ -1126,14 +1181,13 @@ void thread_spin_unlock(int *lock_id, int *info) {
   }
 
   
-  if (!vis_valid(spinlocks,*lock_id)) {
-    pthread_mutex_unlock(&(spinlocks->mutex));
+  pthread_spinlock_t *obj = (pthread_spinlock_t*)(uintptr_t)vtable_get(spinlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  // TODO: this might need a lock
-  *info = pthread_spin_unlock((pthread_spinlock_t*)(spinlocks->data[*lock_id]));
+  *info = pthread_spin_unlock(obj);
 
 }
 #endif
@@ -1223,13 +1277,13 @@ void thread_rwlock_rdlock(int *lock_id, int *info) {
     return;
   }
   
-  if (!is_valid(rwlocks,*lock_id)) {
-    pthread_mutex_unlock(&(rwlocks->mutex));
+  pthread_rwlock_t *obj = (pthread_rwlock_t*)table_get(rwlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_rwlock_rdlock((pthread_rwlock_t*)(rwlocks->data[*lock_id]));
+  *info = pthread_rwlock_rdlock(obj);
 
 }
 
@@ -1241,13 +1295,13 @@ void thread_rwlock_tryrdlock(int *lock_id, int *info) {
     return;
   }
   
-  if (!is_valid(rwlocks,*lock_id)) {
-    pthread_mutex_unlock(&(rwlocks->mutex));
+  pthread_rwlock_t *obj = (pthread_rwlock_t*)table_get(rwlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_rwlock_tryrdlock((pthread_rwlock_t*)(rwlocks->data[*lock_id]));
+  *info = pthread_rwlock_tryrdlock(obj);
 
 }
 
@@ -1260,13 +1314,13 @@ void thread_rwlock_wrlock(int *lock_id, int *info) {
     return;
   }
   
-  if (!is_valid(rwlocks,*lock_id)) {
-    pthread_mutex_unlock(&(rwlocks->mutex));
+  pthread_rwlock_t *obj = (pthread_rwlock_t*)table_get(rwlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_rwlock_wrlock((pthread_rwlock_t*)(rwlocks->data[*lock_id]));
+  *info = pthread_rwlock_wrlock(obj);
 
 }
 
@@ -1278,13 +1332,13 @@ void thread_rwlock_trywrlock(int *lock_id, int *info) {
     return;
   }
   
-  if (!is_valid(rwlocks,*lock_id)) {
-    pthread_mutex_unlock(&(rwlocks->mutex));
+  pthread_rwlock_t *obj = (pthread_rwlock_t*)table_get(rwlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_rwlock_trywrlock((pthread_rwlock_t*)(rwlocks->data[*lock_id]));
+  *info = pthread_rwlock_trywrlock(obj);
 
 }
 
@@ -1296,13 +1350,13 @@ void thread_rwlock_unlock(int *lock_id, int *info) {
     return;
   }
   
-  if (!is_valid(rwlocks,*lock_id)) {
-    pthread_mutex_unlock(&(rwlocks->mutex));
+  pthread_rwlock_t *obj = (pthread_rwlock_t*)table_get(rwlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_rwlock_unlock((pthread_rwlock_t*)(rwlocks->data[*lock_id]));
+  *info = pthread_rwlock_unlock(obj);
 
 }
 
@@ -1321,12 +1375,13 @@ void thread_rwlock_timedrdlock(int *lock_id, struct timespec *abs_timeout, int *
     return;
   }
   
-  if (!is_valid(rwlocks,*lock_id)) {
+  pthread_rwlock_t *obj = (pthread_rwlock_t*)table_get(rwlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
   
-  *info = pthread_rwlock_timedrdlock((pthread_rwlock_t*)(rwlocks->data[*lock_id]),
+  *info = pthread_rwlock_timedrdlock(obj,
                                  abs_timeout);
 
 }
@@ -1344,12 +1399,13 @@ void thread_rwlock_timedwrlock(int *lock_id, struct timespec *abs_timeout, int *
     return;
   }
   
-  if (!is_valid(rwlocks,*lock_id)) {
+  pthread_rwlock_t *obj = (pthread_rwlock_t*)table_get(rwlocks,*lock_id);
+  if (obj == NULL) {
     *info = FT_EINVALID;
     return;
   }
 
-  *info = pthread_rwlock_timedwrlock((pthread_rwlock_t*)(rwlocks->data[*lock_id]),
+  *info = pthread_rwlock_timedwrlock(obj,
                                  abs_timeout);
 
 }
