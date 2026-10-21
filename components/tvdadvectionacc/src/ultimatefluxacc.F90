@@ -1,8 +1,5 @@
 !> Calculates the effective face values for advection using Leonard's ultimate quickest scheme with
 !! first multi-dimension limiter and gradient terms added to the quickest scheme.
-!!
-!! Note that all face courant numbers (e.g. vface) have a factor of 0.5 included. This routine calculates
-!! the right/top face flux although it saves it in FFLXL(J+1) etc...
 module ultimatefluxacc_mod
   use prognostics_mod, only : prognostic_field_type
   use grids_mod, only : X_INDEX, Y_INDEX, Z_INDEX
@@ -15,28 +12,28 @@ module ultimatefluxacc_mod
 
   public ultflx
 
-  real(kind=DEFAULT_PRECISION), parameter :: r6 = 1.0_DEFAULT_PRECISION/6.0_DEFAULT_PRECISION !< A sixth used when calculating fluxes in specific directions
+  real(kind=DEFAULT_PRECISION), parameter :: r6 = 1.0_DEFAULT_PRECISION/6.0_DEFAULT_PRECISION
 
 contains
 
   subroutine ultflx(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
-       local_domain_end_index, local_grid_size, cx, cy, parallel_my_coords, parallel_dim_sizes, kdof, dt, flux_y, flux_z, flux_previous_x, rdz, rdzn, dzn, kmin, kmax)
-    !$acc routine vector
+       local_domain_end_index, local_grid_size, cx, cy, parallel_my_coords, parallel_dim_sizes, &
+       kdof, dt, flux_y, flux_z, flux_previous_x, rdz, rdzn, dzn, kmin, kmax)
+    !$acc routine seq
+    !$omp declare target
 
-    integer, intent(in) ::y_flow_index, x_flow_index, y_scalar_index, x_scalar_index   &! loop counter
-         ,kdof,&                  ! =1 for advection of W, 0 otherwise to shift vertical grid index
-         kmin, kmax
-    real(kind=DEFAULT_PRECISION), intent(in) ::dt   ! timestep (s)
+    integer, intent(in) :: y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, kdof, kmin, kmax
+    real(kind=DEFAULT_PRECISION), intent(in) :: dt
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(in) :: u, w, v, zf
     real(kind=DEFAULT_PRECISION), intent(in) :: cx, cy
     integer, dimension(3), intent(in) :: local_domain_end_index, local_grid_size
     integer, dimension(3), intent(in) :: parallel_my_coords, parallel_dim_sizes
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: rdz, rdzn, dzn
-    real(kind=DEFAULT_PRECISION), intent(out), dimension(:) :: flux_z, flux_y, flux_previous_x ! flux through bottom, left (in y) and left (in x) cell face
+    real(kind=DEFAULT_PRECISION), intent(inout), dimension(:) :: flux_z, flux_y, flux_previous_x
 
     integer :: tester
 
-    tester=12
+    tester = 12
 
 #ifdef W_ACTIVE
     call handle_vertical_fluxes(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
@@ -57,7 +54,8 @@ contains
 
   subroutine handle_vertical_fluxes(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
        local_grid_size, cx, cy, kdof, dt, flux_z, rdz, rdzn, dzn, kmin, kmax)
-    !$acc routine vector
+    !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: kdof, y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, kmin, kmax
     real(kind=DEFAULT_PRECISION), intent(in) :: dt
@@ -65,7 +63,7 @@ contains
     real(kind=DEFAULT_PRECISION), intent(in) :: cx, cy
     integer, dimension(3), intent(in) :: local_grid_size
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: rdz, rdzn, dzn
-    real(kind=DEFAULT_PRECISION), intent(out), dimension(:) :: flux_z
+    real(kind=DEFAULT_PRECISION), intent(inout), dimension(:) :: flux_z
 
     if (kmin==1) call handle_vertical_fluxes_bottomofcolumn(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, &
          zf, cx, cy, kdof, dt, flux_z, rdz, rdzn, dzn)
@@ -78,7 +76,8 @@ contains
 
   subroutine handle_x_direction_fluxes(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, local_grid_size, &
        cx, cy, kdof, dt, flux_x, rdz, kmin, kmax)
-    !$acc routine vector
+    !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, kdof, kmin, kmax
     real(kind=DEFAULT_PRECISION), intent(in) :: dt
@@ -86,20 +85,11 @@ contains
     real(kind=DEFAULT_PRECISION), intent(in) :: cx, cy
     integer, dimension(3), intent(in) :: local_grid_size
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: rdz
-    real(kind=DEFAULT_PRECISION), intent(out), dimension(:) :: flux_x
+    real(kind=DEFAULT_PRECISION), intent(inout), dimension(:) :: flux_x
 
     integer :: k, kp1, kp0
+    real(kind=DEFAULT_PRECISION) :: advneg, advpos, fgt1, fgt2, fc, fcurvs, fd, fdels, fu, sum_cfl_out
 
-    real(kind=DEFAULT_PRECISION) :: advneg,advpos,& !< Sign indicators (0 or 1)
-         fgt1, fgt2,&  !< Gradient terms
-         fc,& !< Upwinded nodal points in z
-         fcurvs,& !< Curvature of F
-         fd,& !< Downwind nodal points in z
-         fdels,&  !< Downwind-upwind difference of F
-         fu,& !< Upwind nodal point
-         sum_cfl_out !< Sum of absolute value of out flowing CFL numbers
-
-    !$acc loop vector
     do k=2, kmax
       kp1=min(k+1,local_grid_size(Z_INDEX))
       kp0=kp1-1
@@ -168,7 +158,8 @@ contains
 
   subroutine handle_y_direction_fluxes(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
        local_grid_size, cx, cy, kdof, dt, flux_y, rdz, kmin, kmax, tester)
-    !$acc routine vector
+    !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, kdof, kmin, kmax, tester
     real(kind=DEFAULT_PRECISION), intent(in) :: dt
@@ -176,20 +167,11 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(in) :: u, w, v, zf
     integer, dimension(3), intent(in) :: local_grid_size
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: rdz
-    real(kind=DEFAULT_PRECISION), intent(out), dimension(:) :: flux_y
+    real(kind=DEFAULT_PRECISION), intent(inout), dimension(:) :: flux_y
 
     integer :: k, kp1, kp0, jofset, jperiod
+    real(kind=DEFAULT_PRECISION) :: advneg, advpos, fgt1, fgt2, fc, fcurvs, fd, fdels, fu, sum_cfl_out
 
-    real(kind=DEFAULT_PRECISION) :: advneg,advpos,& !< Sign indicators (0 or 1)
-         fgt1, fgt2,&  !< Gradient terms
-         fc,& !< Upwinded nodal points in z
-         fcurvs,& !< Curvature of F
-         fd,& !< Downwind nodal points in z
-         fdels,&  !< Downwind-upwind difference of F
-         fu,& !< Upwind nodal point
-         sum_cfl_out !< Sum of absolute value of out flowing CFL numbers
-
-    !$acc loop vector
     do k=2, kmax
       kp1=min(k+1,local_grid_size(Z_INDEX))
       kp0=kp1-1
@@ -239,7 +221,8 @@ contains
 
   subroutine handle_vertical_fluxes_middleofcolumn(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
        local_grid_size, cx, cy, kdof, dt, flux_z, rdz, rdzn, dzn)
-    !$acc routine vector
+    !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: kdof, y_flow_index, x_flow_index, y_scalar_index, x_scalar_index
     real(kind=DEFAULT_PRECISION), intent(in) :: dt
@@ -247,22 +230,11 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(in) :: u, w, v, zf
     integer, dimension(3), intent(in) :: local_grid_size
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: rdz, rdzn, dzn
-    real(kind=DEFAULT_PRECISION), intent(out), dimension(:) :: flux_z
+    real(kind=DEFAULT_PRECISION), intent(inout), dimension(:) :: flux_z
 
     integer :: kofset, k
+    real(kind=DEFAULT_PRECISION) :: advneg, advpos, fgt1, fgt2, fc, fcurvs, fd, fdels, fu, rdc, rdu, sum_cfl_out
 
-    real(kind=DEFAULT_PRECISION) :: advneg,advpos,& !< Sign indicators (0 or 1)
-         fgt1, fgt2,&  !< Gradient terms
-         fc,& !< Upwinded nodal points in z
-         fcurvs,& !< Curvature of F
-         fd,& !< Downwind nodal points in z
-         fdels,&  !< Downwind-upwind difference of F
-         fu,& !< Upwind nodal point
-         rdc,&  !< Central 1/grid size
-         rdu,&  !< Upwinded 1/grid size
-         sum_cfl_out !< Sum of absolute value of out flowing CFL numbers
-
-    !$acc loop vector
     do k=2,local_grid_size(Z_INDEX)-2
       call calculate_stencil_for_w(y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, k, advneg, &
            advpos, fc, fcurvs, fd, fdels, fu, kofset, w, zf)
@@ -314,25 +286,17 @@ contains
   subroutine handle_vertical_fluxes_bottomofcolumn(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
        cx, cy, kdof, dt, flux_z, rdz, rdzn, dzn)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, kdof
     real(kind=DEFAULT_PRECISION), intent(in) :: dt
     real(kind=DEFAULT_PRECISION), intent(in) :: cx, cy
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(in) :: u, w, v, zf
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: rdz, rdzn, dzn
-    real(kind=DEFAULT_PRECISION), intent(out), dimension(:) :: flux_z
+    real(kind=DEFAULT_PRECISION), intent(inout), dimension(:) :: flux_z
 
     integer :: k
-
-    real(kind=DEFAULT_PRECISION) :: fgt1, fgt2,&  !< Gradient terms
-         fc,& !< Upwinded nodal points in z
-         fcurvs,& !< Curvature of F
-         fd,& !< Downwind nodal points in z
-         fdels,&  !< Downwind-upwind difference of F
-         fu,& !< Upwind nodal point
-         rdc,&  !< Central 1/grid size
-         rdu,&  !< Upwinded 1/grid size
-         sum_cfl_out !< Sum of absolute value of out flowing CFL numbers
+    real(kind=DEFAULT_PRECISION) :: fgt1, fgt2, fc, fcurvs, fd, fdels, fu, rdc, rdu, sum_cfl_out
 
     k=1
     if(w(k, y_flow_index, x_flow_index) .ge. 0.0_DEFAULT_PRECISION) then
@@ -378,7 +342,7 @@ contains
              x_flow_index), cx, dt, fc, zf(k, y_scalar_index, x_scalar_index+1), &
              zf(k, y_scalar_index, x_scalar_index-1), 1)
 #endif
-        rdu=rdzn(2)  ! k map_typeped onto 2
+        rdu=rdzn(2)
         rdc=rdz(k+kdof)
       else
         sum_cfl_out=0.0_DEFAULT_PRECISION
@@ -422,6 +386,7 @@ contains
   subroutine handle_vertical_fluxes_topofcolumn(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
        local_grid_size, cx, cy, kdof, dt, flux_z, rdz, rdzn, dzn)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, kdof
     real(kind=DEFAULT_PRECISION), intent(in) :: dt
@@ -429,19 +394,10 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(in) :: u, w, v, zf
     integer, dimension(3), intent(in) :: local_grid_size
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: rdz, rdzn, dzn
-    real(kind=DEFAULT_PRECISION), intent(out), dimension(:) :: flux_z
+    real(kind=DEFAULT_PRECISION), intent(inout), dimension(:) :: flux_z
 
     integer :: k
-
-    real(kind=DEFAULT_PRECISION) :: fgt1, fgt2,&  !< Gradient terms
-         fc,& !< Upwinded nodal points in z
-         fcurvs,& !< Curvature of F
-         fd,& !< Downwind nodal points in z
-         fdels,&  !< Downwind-upwind difference of F
-         fu,& !< Upwind nodal point
-         rdc,&  !< Central 1/grid size
-         rdu,&  !< Upwinded 1/grid size
-         sum_cfl_out !< Sum of absolute value of out flowing CFL numbers
+    real(kind=DEFAULT_PRECISION) :: fgt1, fgt2, fc, fcurvs, fd, fdels, fu, rdc, rdu, sum_cfl_out
 
     k=local_grid_size(Z_INDEX)-1
 
@@ -536,24 +492,14 @@ contains
   real(kind=DEFAULT_PRECISION) function calculate_flux_in_w(k, data_value, dt, sum_cfl_out, rdc, fdels, fd, fc, fu, rdu, fgt1, &
        fgt2, dzn, rdzn)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: k
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: dzn, rdzn
     real(kind=DEFAULT_PRECISION), intent(in) :: dt, sum_cfl_out, rdc, fdels, fd, fc, fu, rdu, fgt1, fgt2
     real(kind=DEFAULT_PRECISION), intent(in) :: data_value
 
-    real(kind=DEFAULT_PRECISION) :: dd,&         !< Downwind grid spacing
-         rdd,&        !< Downwinded 1/grid size
-         cflmod,&     !< Absolute value of face CFL number
-         hrcfl,&      !< 1/SUM_CFL_OUT
-         hcfl,&       !< 0.5*CFLMOD
-         cflcoef,&    !< Coefficient in the QUICKEST calculation
-         rfdels,&     !< 1/FZDELS
-         ffs,&        !< 1d QUICKEST face value of F
-         fnfs,&       !< Normalised face value
-         fncs,&       !< Normalised central node value
-         fnrefs,&     !< Normalised reference value
-         ftemp        !< Limited face value
+    real(kind=DEFAULT_PRECISION) :: dd, rdd, cflmod, hrcfl, hcfl, cflcoef, rfdels, ffs, fnfs, fncs, fnrefs, ftemp
 
     dd=dzn(k+1)
     rdd=rdzn(k+1)
@@ -572,20 +518,12 @@ contains
 
   real(kind=DEFAULT_PRECISION) function calculate_flux_in_x(data_value, dt, sum_cfl_out, fdels, fd, fc, fu, fgt1, fgt2, cx, fcurvs)
     !$acc routine seq
+    !$omp declare target
 
     real(kind=DEFAULT_PRECISION), intent(in) :: sum_cfl_out, fdels, fd, fc, fu, fgt1, fgt2, cx, dt, fcurvs
     real(kind=DEFAULT_PRECISION), intent(in) :: data_value
 
-    real(kind=DEFAULT_PRECISION) :: cflmod,&     !< Absolute value of face CFL number
-         hrcfl,&      !< 1/SUM_CFL_OUT
-         hcfl,&       !< 0.5*CFLMOD
-         cflcoef,&    !< Coefficient in the QUICKEST calculation
-         rfdels,&     !< 1/FZDELS
-         ffs,&        !< 1d QUICKEST face value of F
-         fnfs,&       !< Normalised face value
-         fncs,&       !< Normalised central node value
-         fnrefs,&     !< Normalised reference value
-         ftemp        !< Limited face value
+    real(kind=DEFAULT_PRECISION) :: cflmod, hrcfl, hcfl, cflcoef, rfdels, ffs, fnfs, fncs, fnrefs, ftemp
 
     cflmod=abs(data_value*cx*dt)
     hrcfl=1.0_DEFAULT_PRECISION/(sum_cfl_out+1.e-30_DEFAULT_PRECISION)
@@ -602,20 +540,12 @@ contains
 
   real(kind=DEFAULT_PRECISION) function calculate_flux_in_y(data_value, dt, sum_cfl_out, fdels, fd, fc, fu, fgt1, fgt2, cy, fcurvs)
     !$acc routine seq
+    !$omp declare target
 
     real(kind=DEFAULT_PRECISION), intent(in) :: dt, sum_cfl_out, fdels, fd, fc, fu, fgt1, fgt2, cy, fcurvs
     real(kind=DEFAULT_PRECISION), intent(in) :: data_value
 
-    real(kind=DEFAULT_PRECISION) :: cflmod,&     !< Absolute value of face CFL number
-         hrcfl,&      !< 1/SUM_CFL_OUT
-         hcfl,&       !< 0.5*CFLMOD
-         cflcoef,&    !< Coefficient in the QUICKEST calculation
-         rfdels,&     !< 1/FZDELS
-         ffs,&        !< 1d QUICKEST face value of F
-         fnfs,&       !< Normalised face value
-         fncs,&       !< Normalised central node value
-         fnrefs,&     !< Normalised reference value
-         ftemp        !< Limited face value
+    real(kind=DEFAULT_PRECISION) :: cflmod, hrcfl, hcfl, cflcoef, rfdels, ffs, fnfs, fncs, fnrefs, ftemp
 
     cflmod=abs(data_value*cy*dt)
     hrcfl=1.0_DEFAULT_PRECISION/(sum_cfl_out+1.e-30_DEFAULT_PRECISION)
@@ -633,13 +563,14 @@ contains
   subroutine calculate_stencil_for_u(k, advneg, advpos, fc, fcurvs, fd, fdels, fu, &
        flow_field, advection_field_one, advection_field_two, advection_field_three, advection_field_four)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: k
     real(kind=DEFAULT_PRECISION), intent(in), dimension(:) :: flow_field, advection_field_one, advection_field_two, &
          advection_field_three, advection_field_four
     real(kind=DEFAULT_PRECISION), intent(out) :: advneg, advpos, fc, fcurvs, fd, fdels, fu
 
-    real(kind=DEFAULT_PRECISION) :: sign_modified !< 0.5*sign of u, v or w
+    real(kind=DEFAULT_PRECISION) :: sign_modified
 
     sign_modified = sign(real(.5, kind=DEFAULT_PRECISION),flow_field(k))
     advpos = 0.5_DEFAULT_PRECISION+sign_modified
@@ -654,20 +585,21 @@ contains
   subroutine calculate_stencil_for_y(y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, k, advneg, advpos, &
        fc, fcurvs, fd, fdels, fu, jofset, jperiod, flow_field, zf)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, k
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(in) :: flow_field, zf
     integer, intent(out) :: jofset, jperiod
     real(kind=DEFAULT_PRECISION), intent(out) :: advneg, advpos, fc, fcurvs, fd, fdels, fu
 
-    real(kind=DEFAULT_PRECISION) :: ajeq0, sign_modified !< 0.5*sign of u, v or w
+    real(kind=DEFAULT_PRECISION) :: ajeq0, sign_modified
 
     sign_modified=sign(0.5_DEFAULT_PRECISION, flow_field(k, y_flow_index, x_flow_index))
     advpos=0.5_DEFAULT_PRECISION+sign_modified
     advneg=0.5_DEFAULT_PRECISION-sign_modified
     jofset=nint(advneg)
     ajeq0=0.5_DEFAULT_PRECISION-sign(0.5_DEFAULT_PRECISION, (y_scalar_index-1)-0.5_DEFAULT_PRECISION)
-    jperiod=merge(0,1, y_scalar_index .gt. 1) !nint(jjp*ajeq0)  ! =JJP OR 0
+    jperiod=merge(0,1, y_scalar_index .gt. 1)
 
     fu = zf(k, y_scalar_index-1+jperiod, x_scalar_index)*advpos + zf(k, y_scalar_index+2, x_scalar_index)*advneg
     fc = zf(k, y_scalar_index, x_scalar_index)  *advpos + zf(k, y_scalar_index+1, x_scalar_index)*advneg
@@ -679,13 +611,14 @@ contains
   subroutine calculate_stencil_for_w(y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, k, advneg, advpos, &
        fc, fcurvs, fd, fdels, fu, kofset, flow_field, zf)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: y_flow_index, x_flow_index, y_scalar_index, x_scalar_index, k
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(in) :: flow_field, zf
     integer, intent(out) :: kofset
     real(kind=DEFAULT_PRECISION), intent(out) :: advneg, advpos, fc, fcurvs, fd, fdels, fu
 
-    real(kind=DEFAULT_PRECISION) :: sign_modified !< 0.5*sign of u, v or w
+    real(kind=DEFAULT_PRECISION) :: sign_modified
 
     sign_modified=sign(real(.5, kind=DEFAULT_PRECISION),flow_field(k, y_flow_index, x_flow_index))
     advpos=0.5_DEFAULT_PRECISION+sign_modified
@@ -701,6 +634,7 @@ contains
   real(kind=DEFAULT_PRECISION) function calculate_gradient_term_in_z(k, column_one, column_two, dt, advneg, &
        advpos, kdof, kp0, kp1, source_column_one, source_column_two, rdz)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: k, kdof, kp0, kp1
     real(kind=DEFAULT_PRECISION), intent(in) :: dt, advneg, advpos
@@ -723,6 +657,7 @@ contains
   real(kind=DEFAULT_PRECISION) function calculate_gradient_term_in_x(k, column_one, column_two, column_three, column_four, &
        cx, dt, fc, source_value_one, source_value_two, kpv)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: k, kpv
     real(kind=DEFAULT_PRECISION), intent(in) :: cx, dt, fc
@@ -741,6 +676,7 @@ contains
        term_data_two, term_data_two_y_index, term_data_two_x_index, &
        koffset_two, multiplication_factor_two, data_two, data_two_y_index, data_two_x_index)
     !$acc routine seq
+    !$omp declare target
 
     integer, intent(in) :: k, data_y_index, data_x_index, term_data_one_y_index, term_data_one_x_index
     integer, intent(in), optional :: term_data_two_y_index, term_data_two_x_index, data_two_y_index, data_two_x_index

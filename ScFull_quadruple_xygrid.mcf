@@ -17,7 +17,7 @@ iterativesolver_single_prec_enabled=.false.
 petsc_solver_enabled=.false.
 pw_advection_enabled=.true.
 pw_advection_acc_enabled=.true.
-tvd_advection_acc_enabled=.true.
+tvd_advection_ompt_enabled=.true.
 simplesetup_enabled=.true.
 smagorinsky_enabled=.true.
 lower_bc_enabled=.true.
@@ -59,7 +59,7 @@ walltime_limit=00:05:00
 
 # Advection choices
 advection_flow_fields=pwacc
-advection_theta_field=tvdacc
+advection_theta_field=tvdompt
 advection_q_fields=tvd
 
 # CFL configuration
