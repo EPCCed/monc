@@ -64,14 +64,14 @@ module pencil_fft_mod
   type(cudecompHandle) :: handle_cudecomp
   type(cudecompGridDesc) :: grid_desc_cudecomp
   type(cudecompPencilInfo) :: pinfo_x, pinfo_y, pinfo_z
-  real(real64), allocatable :: data_cudecomp(:)
-  real(real64), target, allocatable, device :: data_cudecomp_d(:)
-  complex*16, target, allocatable, device :: data_cudecompZ_d(:)
+  real(kind=DEFAULT_PRECISION), allocatable :: data_cudecomp(:)
+  real(kind=DEFAULT_PRECISION), target, allocatable, device :: data_cudecomp_d(:)
+  complex(C_DOUBLE_COMPLEX), target, allocatable, device :: data_cudecompZ_d(:)
   integer(8) :: data_num_elements
   integer(8) :: transpose_work_num_elements
   real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: transpose_work_d(:)
   real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: data_cudecomp_x_d(:,:,:), data_cudecomp_y_d(:,:,:), data_cudecomp_z_d(:,:,:)
-  complex*16, pointer, device, contiguous :: data_cudecompZ_y_d(:,:,:)
+  complex(C_DOUBLE_COMPLEX), pointer, device, contiguous :: data_cudecompZ_y_d(:,:,:)
 #endif
 
 contains
@@ -179,7 +179,7 @@ contains
     data_cudecomp_x_d(1:pinfo_x%shape(1), 1:pinfo_x%shape(2), 1:pinfo_x%shape(3)) => data_cudecomp_d(:)
     data_cudecomp_y_d(1:pinfo_y%shape(1), 1:pinfo_y%shape(2), 1:pinfo_y%shape(3)) => data_cudecomp_d(:)
     data_cudecomp_z_d(1:pinfo_z%shape(1), 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecomp_d(:)
-    data_cudecompZ_y_d(1:(pinfo_z%shape(1)/2)+2, 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecompZ_d(:)
+    data_cudecompZ_y_d(1:(pinfo_y%shape(1)/2)+2, 1:pinfo_y%shape(2), 1:pinfo_y%shape(3)) => data_cudecompZ_d(:)
     
   end subroutine initialise_cudecomp
 #endif
@@ -384,7 +384,9 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
     real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(out) :: real_buffer
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:),  contiguous, pointer, intent(inout) :: buffer
-    integer :: n1, n2, n3, nn, plan_id, istat
+    integer :: n1, n2, n3, nn, plan_id, istat, i, j, k
+    complex(c_double_complex), allocatable, device, dimension(:,:,:) :: bufferZ_d
+    real(kind=DEFAULT_PRECISION), allocatable, device, dimension(:,:,:) :: bufferD_d
 
     plan_id = 1
 
@@ -394,28 +396,40 @@ contains
        source_data, fft_in_y_buffer)
     call perform_r2c_fft(fft_in_y_buffer, buffer, y_from_z_transposition%my_pencil_size(Y_INDEX), &
          y_from_z_transposition%my_pencil_size(X_INDEX) * y_from_z_transposition%my_pencil_size(Z_INDEX), plan_id)
+    call convert_complex_to_real(buffer, real_buffer)
 #else   
-    !> Data now on GPU
+    !> Put data on GPU
     data_cudecomp_x_d = source_data
     ! this transpose exists on the gpu.
     ! moves data from monc(z,y,x) on data_cudecomp_x_d to monc(y,x,z) on data_cudecomp_y_d, all on gpu
     istat = cudecompTransposeXToY(handle_cudecomp, grid_desc_cudecomp, data_cudecomp_d, data_cudecomp_d, transpose_work_d, CUDECOMP_DOUBLE)
     ! now use data_cudecomp_y_d to access data
 
+    n1 = size(data_cudecomp_y_d,1)
+    n2 = size(data_cudecomp_y_d,2)
+    n3 = size(data_cudecomp_y_d,3)
+    allocate(bufferD_d(n1,n2,n3), bufferZ_d(n1/2+1, n2, n3))
+
     ! now do fft
-    if (.not. plan_defined(plan_id)) then
-      n1 = size(data_cudecomp_y_d,1)
-      n2 = size(data_cudecomp_y_d,2)
-      n3 = size(data_cudecomp_y_d,3)
+    if (.not. plan_defined(plan_id)) then      
       nn = n2*n3
       call fft_r2c_gpu_init(plans(plan_id),n1, istat, nn)
       plan_defined(plan_id) = .true.
     end if
-    istat = cufftExecD2Z(plans(plan_id), data_cudecomp_y_d, data_cudecompZ_y_d)
-    buffer = data_cudecompZ_y_d
+    istat = cufftExecD2Z(plans(plan_id), data_cudecomp_y_d, bufferZ_d)
+    ! complex to real on gpu:
+    !$cuf kernel do (3) <<<*,*>>>
+    do k=1, n3
+      do j = 1, n2
+        do i = 1, n1, 2
+          bufferD_d(i, j, k)   = real( real(bufferZ_d((i+1)/2, j, k)), kind=DEFAULT_PRECISION)
+          bufferD_d(i+1, j, k) = real(aimag(bufferZ_d((i+1)/2, j, k)), kind=DEFAULT_PRECISION)
+        end do
+      end do
+    end do
+    real_buffer = bufferD_d
     !> Data now off GPU
 #endif    
-    call convert_complex_to_real(buffer, real_buffer)
   end subroutine transpose_and_forward_fft_in_y
 
 #ifdef CUDECOMP
