@@ -179,7 +179,7 @@ contains
     data_cudecomp_x_d(1:pinfo_x%shape(1), 1:pinfo_x%shape(2), 1:pinfo_x%shape(3)) => data_cudecomp_d(:)
     data_cudecomp_y_d(1:pinfo_y%shape(1), 1:pinfo_y%shape(2), 1:pinfo_y%shape(3)) => data_cudecomp_d(:)
     data_cudecomp_z_d(1:pinfo_z%shape(1), 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecomp_d(:)
-    data_cudecompZ_y_d(1:(pinfo_z%shape(1)+1)/2, 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecompZ_d(:)
+    data_cudecompZ_y_d(1:(pinfo_z%shape(1)/2)+2, 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecompZ_d(:)
     
   end subroutine initialise_cudecomp
 #endif
@@ -385,7 +385,6 @@ contains
     real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(out) :: real_buffer
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:),  contiguous, pointer, intent(inout) :: buffer
     integer :: n1, n2, n3, nn, plan_id, istat
-    complex*16, allocatable, device, dimension(:,:,:) :: out_d
 
     plan_id = 1
 
@@ -398,22 +397,22 @@ contains
 #else   
     !> Data now on GPU
     data_cudecomp_x_d = source_data
+    ! this transpose exists on the gpu.
+    ! moves data from monc(z,y,x) on data_cudecomp_x_d to monc(y,x,z) on data_cudecomp_y_d, all on gpu
     istat = cudecompTransposeXToY(handle_cudecomp, grid_desc_cudecomp, data_cudecomp_d, data_cudecomp_d, transpose_work_d, CUDECOMP_DOUBLE)
     ! now use data_cudecomp_y_d to access data
 
-    n1 = size(data_cudecomp_y_d,1)
-    n2 = size(data_cudecomp_y_d,2)
-    n3 = size(data_cudecomp_y_d,3)
-    nn = n2*n3
-
-    allocate(out_d(n1/2+1,n2,n3))
     ! now do fft
     if (.not. plan_defined(plan_id)) then
+      n1 = size(data_cudecomp_y_d,1)
+      n2 = size(data_cudecomp_y_d,2)
+      n3 = size(data_cudecomp_y_d,3)
+      nn = n2*n3
       call fft_r2c_gpu_init(plans(plan_id),n1, istat, nn)
       plan_defined(plan_id) = .true.
     end if
-    istat = cufftExecD2Z(plans(plan_id), data_cudecomp_y_d, out_d)
-    buffer = out_d
+    istat = cufftExecD2Z(plans(plan_id), data_cudecomp_y_d, data_cudecompZ_y_d)
+    buffer = data_cudecompZ_y_d
     !> Data now off GPU
 #endif    
     call convert_complex_to_real(buffer, real_buffer)
