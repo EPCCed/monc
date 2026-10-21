@@ -212,13 +212,13 @@ contains
       end if
     end if
 
-    !if (is_component_enabled(current_state%options_database, "tvd_advection_acc")) then
-    !  source_field_accelerated_info = get_component_field_information(current_state, "tvd_advection_acc_sth")
-    !  if (source_field_accelerated_info%enabled) then
-    !    source_field_accelerated = get_component_field_value(current_state, "tvd_advection_acc_sth")
-    !    current_state%sth%data = current_state%sth%data + source_field_accelerated%real_3d_array_ptr
-    !  end if
-    !end if
+    if (is_component_enabled(current_state%options_database, "tvd_advection_acc")) then
+      source_field_accelerated_info = get_component_field_information(current_state, "tvd_advection_acc_sth")
+      if (source_field_accelerated_info%enabled) then
+        source_field_accelerated = get_component_field_value(current_state, "tvd_advection_acc_sth")
+        current_state%sth%data = current_state%sth%data + source_field_accelerated%real_3d_array_ptr
+      end if
+    end if
 
     if (is_component_enabled(current_state%options_database, "pw_advection_acc")) then
       source_field_accelerated_info = get_component_field_information(current_state, "pw_advection_acc_su")

@@ -66,7 +66,7 @@ contains
     integer :: send_handle, recv_handle, x, y
 
     if (name .eq. "tvd_advection_acc_sth") then
-       !!$acc wait(11)
+       !$acc wait(11)
        send_handle = register_y_flux_wrap_send_if_required(d_flux_y(:, current_state%local_grid%local_domain_start_index(Y_INDEX)-1, :), &
                 flux_y_buffer, current_state%parallel, current_state%local_grid)
        call complete_y_flux_wrap_send_if_required(current_state%parallel, current_state%local_grid, send_handle)
@@ -187,7 +187,7 @@ contains
 
     call free_stencil(star_stencil)
     if (allocated(interpolated_fields)) deallocate(interpolated_fields)
-    !!$acc exit data
+    !$acc exit data delete(interpolated_fields)
   end subroutine finalisation_callback  
 
   !> Timestep callback hook which performs the TVD advection for each prognostic field
@@ -283,7 +283,7 @@ contains
                     rdz, rdzn, dzn, t, kmax)
       end do
     end do
-    !!$acc update host(d_flux_x, d_flux_y, d_flux_z) wait(10) async(11)
+    !$acc update host(d_flux_x, d_flux_y, d_flux_z) wait(10) async(11)
   end subroutine
 
   !> Advects a single scalar field
