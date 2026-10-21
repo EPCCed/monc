@@ -66,10 +66,12 @@ module pencil_fft_mod
   type(cudecompPencilInfo) :: pinfo_x, pinfo_y, pinfo_z
   real(real64), allocatable :: data_cudecomp(:)
   real(real64), target, allocatable, device :: data_cudecomp_d(:)
+  complex*16, target, allocatable, device :: data_cudecompZ_d(:)
   integer(8) :: data_num_elements
   integer(8) :: transpose_work_num_elements
   real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: transpose_work_d(:)
   real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: data_cudecomp_x_d(:,:,:), data_cudecomp_y_d(:,:,:), data_cudecomp_z_d(:,:,:)
+  complex*16, pointer, device, contiguous :: data_cudecompZ_y_d(:,:,:)
 #endif
 
 contains
@@ -164,7 +166,7 @@ contains
     data_num_elements = max(pinfo_x%size, pinfo_y%size, pinfo_z%size)
 
     ! Allocate device buffer
-    allocate(data_cudecomp_d(data_num_elements))
+    allocate(data_cudecomp_d(data_num_elements), data_cudecompZ_d(data_num_elements))
 
     ! Allocate host buffer
     allocate(data_cudecomp(data_num_elements))
@@ -177,6 +179,7 @@ contains
     data_cudecomp_x_d(1:pinfo_x%shape(1), 1:pinfo_x%shape(2), 1:pinfo_x%shape(3)) => data_cudecomp_d(:)
     data_cudecomp_y_d(1:pinfo_y%shape(1), 1:pinfo_y%shape(2), 1:pinfo_y%shape(3)) => data_cudecomp_d(:)
     data_cudecomp_z_d(1:pinfo_z%shape(1), 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecomp_d(:)
+    data_cudecompZ_y_d(1:(pinfo_z%shape(1)+1)/2, 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecompZ_d(:)
     
   end subroutine initialise_cudecomp
 #endif
@@ -380,18 +383,39 @@ contains
     type(model_state_type), target, intent(inout) :: current_state
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
     real(kind=DEFAULT_PRECISION), dimension(:,:,:),  intent(out) :: real_buffer
-    complex(C_DOUBLE_COMPLEX), dimension(:,:,:),  contiguous, pointer, intent(out) :: buffer
+    complex(C_DOUBLE_COMPLEX), dimension(:,:,:),  contiguous, pointer, intent(inout) :: buffer
+    integer :: n1, n2, n3, nn, plan_id, istat
+    complex*16, allocatable, device, dimension(:,:,:) :: out_d
+
+    plan_id = 1
 
 #ifndef CUDECOMP
     ! Transpose globally from Z pencil to Y pencil
     call transpose_to_pencil(y_from_z_transposition, (/Z_INDEX, Y_INDEX, X_INDEX/), dim_y_comm, FORWARD, &
        source_data, fft_in_y_buffer)
-#else   
-    ! this is where we should use cudecomp to do the transpose:
-    call transpose_z_to_y_cudecomp(source_data, fft_in_y_buffer)
-#endif    
     call perform_r2c_fft(fft_in_y_buffer, buffer, y_from_z_transposition%my_pencil_size(Y_INDEX), &
-         y_from_z_transposition%my_pencil_size(X_INDEX) * y_from_z_transposition%my_pencil_size(Z_INDEX), 1)
+         y_from_z_transposition%my_pencil_size(X_INDEX) * y_from_z_transposition%my_pencil_size(Z_INDEX), plan_id)
+#else   
+    !> Data now on GPU
+    data_cudecomp_x_d = source_data
+    istat = cudecompTransposeXToY(handle_cudecomp, grid_desc_cudecomp, data_cudecomp_d, data_cudecomp_d, transpose_work_d, CUDECOMP_DOUBLE)
+    ! now use data_cudecomp_y_d to access data
+
+    n1 = size(data_cudecomp_y_d,1)
+    n2 = size(data_cudecomp_y_d,2)
+    n3 = size(data_cudecomp_y_d,3)
+    nn = n2*n3
+
+    allocate(out_d(n1/2+1,n2,n3))
+    ! now do fft
+    if (.not. plan_defined(plan_id)) then
+      call fft_r2c_gpu_init(plans(plan_id),n1, istat, nn)
+      plan_defined(plan_id) = .true.
+    end if
+    istat = cufftExecD2Z(plans(plan_id), data_cudecomp_y_d, out_d)
+    buffer = out_d
+    !> Data now off GPU
+#endif    
     call convert_complex_to_real(buffer, real_buffer)
   end subroutine transpose_and_forward_fft_in_y
 
