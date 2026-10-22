@@ -371,8 +371,12 @@ contains
     complex(C_DOUBLE_COMPLEX), dimension(:,:,:),  contiguous, pointer, intent(out) :: buffer
 
     ! Transpose globally from Z pencil to Y pencil
+#ifndef CUDECOMP
     call transpose_to_pencil(y_from_z_transposition, (/Z_INDEX, Y_INDEX, X_INDEX/), dim_y_comm, FORWARD, &
        source_data, fft_in_y_buffer)
+#else
+    call transpose_z_to_y_cudecomp(source_data, fft_in_y_buffer)
+#endif
     
     call perform_r2c_fft(fft_in_y_buffer, buffer, y_from_z_transposition%my_pencil_size(Y_INDEX), &
          y_from_z_transposition%my_pencil_size(X_INDEX) * y_from_z_transposition%my_pencil_size(Z_INDEX), 1)
