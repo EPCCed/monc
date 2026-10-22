@@ -59,6 +59,18 @@ module pencil_fft_mod
   integer :: plans(4)=0
   logical :: plan_defined(4)=.false.
 
+#ifdef CUDECOMP
+  type(cudecompGridDescConfig) :: config_cudecomp
+  type(cudecompHandle) :: handle_cudecomp
+  type(cudecompGridDesc) :: grid_desc_cudecomp
+  type(cudecompPencilInfo) :: pinfo_x, pinfo_y, pinfo_z
+  real(real64), allocatable :: data_cudecomp(:)
+  real(real64), target, allocatable, device :: data_cudecomp_d(:)
+  integer(8) :: data_num_elements
+  integer(8) :: transpose_work_num_elements
+  real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: transpose_work_d(:)
+  real(kind=DEFAULT_PRECISION), pointer, device, contiguous :: data_cudecomp_x_d(:,:,:), data_cudecomp_y_d(:,:,:), data_cudecomp_z_d(:,:,:)
+#endif
 
 contains
 
@@ -107,6 +119,10 @@ contains
     initialise_pencil_fft=z_from_y_transposition%my_pencil_size
 
     call log_master_newline()
+
+#ifdef CUDECOMP
+    call initialise_cudecomp(current_state)
+#endif
     
     nforward = 0
     nback = 0
@@ -114,6 +130,56 @@ contains
     tforward = 0.d0
     tback = 0d0
   end function initialise_pencil_fft
+
+#ifdef CUDECOMP
+  subroutine initialise_cudecomp(current_state)
+    type(model_state_type), intent(inout) :: current_state
+    integer :: istat, p_rows, p_cols, ierr
+    ierr = cudaSetDevice(0)    
+    istat = cudecompInit(handle_cudecomp, current_state%parallel%monc_communicator)
+    istat = cudecompGridDescConfigSetDefaults(config_cudecomp)
+    !call CHECK_CUDECOMP_EXIT(istat)
+    config_cudecomp%pdims = [current_state%parallel%dim_sizes(Y_INDEX), current_state%parallel%dim_sizes(X_INDEX)]
+    !Required?
+    ! config_cudecomp%rank_order = CUDECOMP_RANK_ORDER_COL_MAJOR
+    config_cudecomp%gdims = [current_state%global_grid%size(Z_INDEX), current_state%global_grid%size(Y_INDEX),current_state%global_grid%size(X_INDEX)]
+    config_cudecomp%transpose_comm_backend = CUDECOMP_TRANSPOSE_COMM_MPI_P2P
+    config_cudecomp%transpose_axis_contiguous = [.true., .true., .true.]
+    istat = cudecompGridDescCreate(handle_cudecomp, grid_desc_cudecomp, config_cudecomp)
+    !call CHECK_CUDECOMP_EXIT(istat)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    ! Get X-pencil information (with halo elements)
+    istat = cudecompGetPencilInfo(handle_cudecomp, grid_desc_cudecomp, pinfo_x, 1)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    ! Get Y-pencil information
+    istat = cudecompGetPencilInfo(handle_cudecomp, grid_desc_cudecomp, pinfo_y, 2)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    ! Get Z-pencil information
+    istat = cudecompGetPencilInfo(handle_cudecomp, grid_desc_cudecomp, pinfo_z, 3)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    data_num_elements = max(pinfo_x%size, pinfo_y%size, pinfo_z%size)
+
+    ! Allocate device buffer
+    allocate(data_cudecomp_d(data_num_elements))
+
+    ! Allocate host buffer
+    allocate(data_cudecomp(data_num_elements))
+    istat = cudecompGetTransposeWorkspaceSize(handle_cudecomp, grid_desc_cudecomp, transpose_work_num_elements)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    istat = cudecompMalloc(handle_cudecomp, grid_desc_cudecomp, transpose_work_d, transpose_work_num_elements)
+    !call CHECK_CUDECOMP_EXIT(istat)
+
+    data_cudecomp_x_d(1:pinfo_x%shape(1), 1:pinfo_x%shape(2), 1:pinfo_x%shape(3)) => data_cudecomp_d(:)
+    data_cudecomp_y_d(1:pinfo_y%shape(1), 1:pinfo_y%shape(2), 1:pinfo_y%shape(3)) => data_cudecomp_d(:)
+    data_cudecomp_z_d(1:pinfo_z%shape(1), 1:pinfo_z%shape(2), 1:pinfo_z%shape(3)) => data_cudecomp_d(:)
+    
+  end subroutine initialise_cudecomp
+#endif
 
   !> Cleans up allocated buffer memory
   subroutine finalise_pencil_fft(monc_communicator)
