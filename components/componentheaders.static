@@ -30,6 +30,7 @@ use pressuresource_mod, only : pressuresource_get_descriptor
 use profile_diagnostics_mod, only : profile_diagnostics_get_descriptor
 use pstep_mod, only : pstep_get_descriptor
 use pwadvection_mod, only : pwadvection_get_descriptor
+use pwadvectionompt_mod, only : pwadvectionompt_get_descriptor
 use randomnoise_mod, only : randomnoise_get_descriptor
 use scalar_diagnostics_mod, only : scalar_diagnostics_get_descriptor
 use set_consistent_lowbc_mod, only : set_consistent_lowbc_get_descriptor

@@ -41,6 +41,7 @@ profile_diagnostics_enabled=.false.
 psrce_enabled=.true.
 pstep_enabled=.true.
 pw_advection_enabled=.true.
+pw_advection_ompt_enabled=.false.
 scalar_diagnostics_enabled=.false.
 set_consistent_lowbc_enabled=.true.
 setfluxlook_enabled=.true.
