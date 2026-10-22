@@ -14,11 +14,10 @@ module ultimateflux_mod
   private
 #endif
 
+
   public ultflx
 
-  real(kind=DEFAULT_PRECISION) :: r6 !< A sixth used when calculating fluxes in specific directions
-  !$omp declare target(r6)
-
+    real(kind=DEFAULT_PRECISION), parameter :: r6 = 1.0_DEFAULT_PRECISION/6.0_DEFAULT_PRECISION !< A sixth used when calculating fluxes in specific directions
 contains
 
   subroutine ultflx(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
@@ -38,7 +37,6 @@ contains
          ,flux_y         &! flux through left (y-dirn) cell face
          ,flux_x         &! flux through left (x-dirn) cell face
          ,flux_previous_x
-    r6 = 1.0_DEFAULT_PRECISION/6.0_DEFAULT_PRECISION
 
 #ifdef W_ACTIVE
     call handle_vertical_fluxes(y_flow_index, x_flow_index, u, v, w, y_scalar_index, x_scalar_index, zf, &
