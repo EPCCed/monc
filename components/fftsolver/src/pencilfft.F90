@@ -130,28 +130,6 @@ contains
     initialise_pencil_fft=z_from_y_transposition%my_pencil_size
 
     call log_master_newline()
-
-    
-
-    print_info=.true.
-    if (print_info) then
-      write(*,*)
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T1 cudecompinfo x-pen (monc z), (x,y,z):", pinfo_T1_x%shape(1), pinfo_T1_x%shape(2), pinfo_T1_x%shape(3)
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T1 cudecompinfo y-pen(y,z,x):", pinfo_T1_y%shape(1), pinfo_T1_y%shape(2), pinfo_T1_y%shape(3)
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T1 cudecompinfo z-pen (monc x), (z,x,y):", pinfo_T1_z%shape(1), pinfo_T1_z%shape(2), pinfo_T1_z%shape(3)
-
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T2 cudecompinfo x-pen (monc z), (x,y,z):", pinfo_T2_x%shape(1), pinfo_T2_x%shape(2), pinfo_T2_x%shape(3)
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T2 cudecompinfo y-pen(y,z,x):", pinfo_T2_y%shape(1), pinfo_T2_y%shape(2), pinfo_T2_y%shape(3)
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T2 cudecompinfo z-pen (monc x), (z,x,y):", pinfo_T2_z%shape(1), pinfo_T2_z%shape(2), pinfo_T2_z%shape(3)
-
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T3 cudecompinfo x-pen (monc z), (x,y,z):", pinfo_T3_x%shape(1), pinfo_T3_x%shape(2), pinfo_T3_x%shape(3)
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T3 cudecompinfo y-pen(y,z,x):", pinfo_T3_y%shape(1), pinfo_T3_y%shape(2), pinfo_T3_y%shape(3)
-      write(*,'(a5,i2,a42,3i4)') "rank:",rank,",T3 cudecompinfo z-pen (monc x), (z,x,y):", pinfo_T3_z%shape(1), pinfo_T3_z%shape(2), pinfo_T3_z%shape(3)
-
-      write(*,'(a5,i2,a40,3i4)') "rank:",rank,", monc decompinfo z-pen(z,y,x):", z_from_y_transposition%my_pencil_size(1),z_from_y_transposition%my_pencil_size(2),z_from_y_transposition%my_pencil_size(3)
-      write(*,'(a5,i2,a40,3i4)') "rank:", rank," monc decompinfo y-pen(y,z,x):", size(real_buffer1,1), size(real_buffer1,2), size(real_buffer1,3)
-      write(*,'(a5,i2,a40,3i4)') "rank:",rank,", monc decompinfo x-pen(x,y,z):", size(real_buffer2,1), size(real_buffer2,2), size(real_buffer2,3)
-    endif
     
     nforward = 0
     nback = 0
@@ -190,8 +168,6 @@ contains
     logical :: print_info
     ierr = cudaSetDevice(0)    
     istat = cudecompInit(handle_cudecomp_T1, current_state%parallel%monc_communicator)
-    !istat = cudecompInit(handle_cudecomp_T2, current_state%parallel%monc_communicator)
-    !istat = cudecompInit(handle_cudecomp_T3, current_state%parallel%monc_communicator)
 
     istat = cudecompGridDescConfigSetDefaults(config_cudecomp_T1)
     istat = cudecompGridDescConfigSetDefaults(config_cudecomp_T2)
@@ -221,11 +197,11 @@ contains
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T1, pinfo_T1_x, 1)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T1, pinfo_T1_y, 2)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T1, pinfo_T1_z, 3)
-
+    ! Get pencil information for T2 (with halo elements)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T2, pinfo_T2_x, 1)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T2, pinfo_T2_y, 2)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T2, pinfo_T2_z, 3)
-
+    ! Get pencil information for T3 (with halo elements)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T3, pinfo_T3_x, 1)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T3, pinfo_T3_y, 2)
     istat = cudecompGetPencilInfo(handle_cudecomp_T1, grid_desc_cudecomp_T3, pinfo_T3_z, 3)
@@ -241,15 +217,6 @@ contains
 
     ! Allocate host buffer
     allocate(data_cudecomp(data_num_elements))
-
-    !> Workspace allocation - this might not work properly, so can try to use CUDECOMP_WORKSPACE_AUTO in transpose calls
-    !istat = cudecompGetTransposeWorkspaceSize(handle_cudecomp_T1, grid_desc_cudecomp_T1, transpose_work_num_elements)
-    !istat = cudecompGetTransposeWorkspaceSize(handle_cudecomp_T2, grid_desc_cudecomp_T2, transpose_work_num_elements)
-    !istat = cudecompGetTransposeWorkspaceSize(handle_cudecomp_T3, grid_desc_cudecomp_T3, transpose_work_num_elements)
-    !call CHECK_CUDECOMP_EXIT(istat)
-
-    !istat = cudecompMalloc(handle_cudecomp_T3, grid_desc_cudecomp_T3, transpose_work_d, transpose_work_num_elements)
-    !call CHECK_CUDECOMP_EXIT(istat)
 
     data_cudecomp_T1_x_d(1:pinfo_T1_x%shape(1), 1:pinfo_T1_x%shape(2), 1:pinfo_T1_x%shape(3)) => data_cudecomp_d(:)
     data_cudecomp_T1_y_d(1:pinfo_T1_y%shape(1), 1:pinfo_T1_y%shape(2), 1:pinfo_T1_y%shape(3)) => data_cudecomp_d(:)
@@ -282,6 +249,11 @@ contains
 #else
     call log_master_log(LOG_INFO, "Using CPU for FFT")
 #endif
+#ifdef CUDECOMP
+    call log_master_log(LOG_INFO, "Using GPU for Transposes")
+#else
+    call log_master_log(LOG_INFO, "Using CPU for Transposes")
+#endif
     call log_master_log(LOG_INFO, "Total time in forward FFT ="//trim(conv_to_string(tforward))//" s")
     call log_master_log(LOG_INFO, "Total time in backward FFT ="//trim(conv_to_string(tback))//" s")
     call log_master_log(LOG_INFO, "Time per forward FFT ="//trim(conv_to_string(t_per_forward))//" s")
@@ -309,19 +281,15 @@ contains
 #ifndef CUDECOMP
     call transpose_to_pencil(y_from_x_transposition, (/X_INDEX, Z_INDEX, Y_INDEX/), dim_x_comm, BACKWARD, &
          real_buffer2, real_buffer3)
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_x with monc (Backward)"
 #else
     call transpose_x_to_y_cudecomp_T3(real_buffer2, real_buffer3)
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_x with cudecomp (Backward), T3"
 #endif
 
 #ifndef CUDECOMP
     call transpose_to_pencil(z_from_y_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_y_comm, BACKWARD, &
-       real_buffer3, target_data)  
-    if (rank==0) write(*,*) "[DEBUG] Transpose z_from_y with monc (Backward)"
+       real_buffer3, target_data)
 #else 
     call transpose_y_to_z_cudecomp_T3(real_buffer3, target_data)
-    if (rank==0) write(*,*) "[DEBUG] Transpose z_from_y with cudecomp (Backward), T3"
 #endif
   end subroutine perform_forward_3dfft
 
@@ -339,19 +307,15 @@ contains
 #ifndef CUDECOMP
     call transpose_to_pencil(y_from_z_2_transposition, (/Z_INDEX, Y_INDEX, X_INDEX/), dim_y_comm, FORWARD, &
        source_data, real_buffer3)
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_z_2 with monc (Forward)"
 #else
     call transpose_z_to_y_cudecomp_T3(source_data, real_buffer3)
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_z_2 with cudecomp (Forward), T3"
 #endif
 
 #ifndef CUDECOMP
     call transpose_to_pencil(x_from_y_2_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_x_comm, FORWARD, &
        real_buffer3, real_buffer2)
-    if (rank==0) write(*,*) "[DEBUG] Transpose x_from_y_2 with monc (Forward)"
 #else
     call transpose_y_to_x_cudecomp_T3(real_buffer3, real_buffer2)
-    if (rank==0) write(*,*) "[DEBUG] Transpose x_from_y_2 with cudecomp (Forward), T3"
 #endif
 
     call transpose_and_backward_fft_in_x(current_state, real_buffer2, buffer2, real_buffer1)
@@ -359,107 +323,8 @@ contains
   end subroutine perform_backwards_3dfft
 
   !> Initialises memory for the buffers used in the FFT
-
-  !  source is current_state%p%data
-!perform_forward_3dfft------------------
-!----------------------------------------
-    !--tx_+_for_in_y
-    !----------------------------------------   
-        ! source : zyx-rr_rr_rr
-        !                T1 (t_z_to_y)
-        ! fft_in_y_buffer : yxz-rr_rr_rr
-        !                FFT
-        ! buffer1 : yxz-sc_rr_rr
-        !                c2r
-        ! real_buffer1 : yxz-2sr_rr-rr
-    !--tx+for_in_x
-    !----------------------------------------
-        !                T2 (t_y_to_x)
-        ! fft_in_x_buffer : xzy-rr_rr_2sr
-        !                FFT
-        ! buffer2 : xzy-sc_rr_2sr
-        !                c2r
-        ! real_buffer_2 : xzy-2sr_rr_2sr
-    !                T3 (t_x_to_y)
-    ! real_buffer3 : yxz-2sr-2sr-rr  ?
-    !                T3 (t_y_to_z)
-    ! target : zyx-rr_2sr_2sr  ----> Source
-  ! target is pt (from fftsolver.F90)
-!---------------------------------------------
-
-!< do the pressure solve here (tridiagonal_solver in fftsolver.F90)>
-
-! source is pt (from fftsolver.F90)
-! Perform_back_3dfft
-!---------------------------------------------
-    ! source : zyx-rr_2sr_2sr
-    !                T3  (t_z_to_y)
-    ! real_buffer3 : yxz-2sr-2sr-rr 
-    !                T3 (t_y_to_x)
-    ! real_buffer_2 : xzy-2sr_rr_2sr
-
-    ! tx_and_back_fft_in_x
-    !----------------------------------
-          !                r2c
-          ! buffer2 : xzy-2sc_rr_2sr
-          !                ifft
-          ! fft_in_x_buffer : xzy-rr_rr_2sr
-          !                T2 (t_x_to_y)
-          ! real_buffer_1 : yxz-2sr_rr_rr
-    ! tx_and_back_fft_in_y
-    !---------------------------------
-        !                r2c
-        ! buffer1 : yxz-2sc_rr_rr
-        !                ifft
-        ! fft_in_y_buffer : yxz-rr_rr_rr
-        !                T1 (t_y_to_z)
-        ! target : zyx-rr-rr-rr
-  ! target is current_state%p%data
-!---------------------------------------
-
-  ! 
+  !
   subroutine initialise_buffers()
-    integer, dimension(3) :: nfft_in_y_buffer, nbuffer1, nreal_buffer1, nfft_in_x_buffer, nbuffer2
-    integer, dimension(3) :: nreal_buffer2, nreal_buffer3
-    integer :: cy1, cy2, cy3, cx1, cx2, cx3
-    ! fft_in_y_buffer
-    nfft_in_y_buffer(1) = y_from_z_transposition%my_pencil_size(Y_INDEX)
-    nfft_in_y_buffer(2) = y_from_z_transposition%my_pencil_size(X_INDEX)
-    nfft_in_y_buffer(3) = y_from_z_transposition%my_pencil_size(Z_INDEX)
-    
-    nbuffer1(1)         = y_from_z_transposition%my_pencil_size(Y_INDEX)/2+1
-    nbuffer1(2)         = y_from_z_transposition%my_pencil_size(X_INDEX)
-    nbuffer1(3)         = y_from_z_transposition%my_pencil_size(Z_INDEX)
-
-    nreal_buffer1(1)    = (y_from_z_transposition%my_pencil_size(Y_INDEX)/2+1)*2
-    nreal_buffer1(2)    = y_from_z_transposition%my_pencil_size(X_INDEX)
-    nreal_buffer1(3)    = y_from_z_transposition%my_pencil_size(Z_INDEX)
-
-    nfft_in_x_buffer(1) = x_from_y_transposition%my_pencil_size(X_INDEX)
-    nfft_in_x_buffer(2) = x_from_y_transposition%my_pencil_size(Z_INDEX)
-    nfft_in_x_buffer(3) = x_from_y_transposition%my_pencil_size(Y_INDEX)
-
-    nbuffer2(1)         = x_from_y_transposition%my_pencil_size(X_INDEX)/2+1
-    nbuffer2(2)         = x_from_y_transposition%my_pencil_size(Z_INDEX)
-    nbuffer2(3)         = x_from_y_transposition%my_pencil_size(Y_INDEX)
-
-    nreal_buffer2(1)    = (x_from_y_transposition%my_pencil_size(X_INDEX)/2+1)*2
-    nreal_buffer2(2)    = x_from_y_transposition%my_pencil_size(Z_INDEX)
-    nreal_buffer2(3)    = x_from_y_transposition%my_pencil_size(Y_INDEX)
-
-    nreal_buffer3(1)    = y_from_x_transposition%my_pencil_size(Y_INDEX)
-    nreal_buffer3(2)    = y_from_x_transposition%my_pencil_size(X_INDEX)
-    nreal_buffer3(3)    = y_from_x_transposition%my_pencil_size(Z_INDEX)
-
-    write(*,'(a20,3i3)') "MONC:, rank:", rank
-    write(*,'(a20,3i3)') "fft_in_y(Y,X,Z):",     nfft_in_y_buffer(1), nfft_in_y_buffer(2), nfft_in_y_buffer(3)
-    write(*,'(a20,3i3)') "buffer1(Y,X,Z):",       nbuffer1(1), nbuffer1(2), nbuffer1(3)
-    write(*,'(a20,3i3)') "real_buffer1(Y,X,Z):", nreal_buffer1(1), nreal_buffer1(2), nreal_buffer1(3)
-    write(*,'(a20,3i3)') "fft_in_x(X,Z,Y) A :",     nfft_in_x_buffer(1),nfft_in_x_buffer(2),nfft_in_x_buffer(3)
-    write(*,'(a20,3i3)') "buffer2(x,z,y):",      nbuffer2(1), nbuffer2(2), nbuffer2(3)
-    write(*,'(a20,3i3)') "real_buffer2(x,z,y):", nreal_buffer2(1), nreal_buffer2(2), nreal_buffer2(3)
-    write(*,'(a20,3i3)') "real_buffer3(y,x,z):", nreal_buffer3(1), nreal_buffer3(2), nreal_buffer3(3)
-
 #ifndef CUDECOMP
     allocate(fft_in_y_buffer(y_from_z_transposition%my_pencil_size(Y_INDEX), y_from_z_transposition%my_pencil_size(X_INDEX), &
                         y_from_z_transposition%my_pencil_size(Z_INDEX)), &
@@ -477,51 +342,6 @@ contains
                         y_from_x_transposition%my_pencil_size(Z_INDEX)))
 #else
     
-
-    nfft_in_y_buffer(1) = pinfo_T1_y%shape(1)
-    nfft_in_y_buffer(2) = pinfo_T1_y%shape(2)
-    nfft_in_y_buffer(3) = pinfo_T1_y%shape(3)
-
-    nbuffer1(1)         = pinfo_T1_y%shape(1)/2+1
-    nbuffer1(2)         = pinfo_T1_y%shape(2)
-    nbuffer1(3)         = pinfo_T1_y%shape(3)
-
-    nreal_buffer1(1)    = pinfo_T2_y%shape(1)
-    nreal_buffer1(2)    = pinfo_T2_y%shape(2)
-    nreal_buffer1(3)    = pinfo_T2_y%shape(3)
-
-    nfft_in_x_buffer(1) = pinfo_T2_z%shape(1)
-    nfft_in_x_buffer(1) = pinfo_T2_z%shape(2)
-    nfft_in_x_buffer(1) = pinfo_T2_z%shape(3)
-
-    nbuffer2(1)         = pinfo_T2_z%shape(1)/2+1
-    nbuffer2(2)         = pinfo_T2_z%shape(2)
-    nbuffer2(3)         = pinfo_T2_z%shape(3)
-
-    nreal_buffer2(1)    = pinfo_T3_z%shape(1)
-    nreal_buffer2(2)    = pinfo_T3_z%shape(2)
-    nreal_buffer2(3)    = pinfo_T3_z%shape(3)
-
-    nreal_buffer3(1)    = pinfo_T3_y%shape(1)
-    nreal_buffer3(2)    = pinfo_T3_y%shape(2)
-    nreal_buffer3(3)    = pinfo_T3_y%shape(3)
-
-    write(*,'(a20,3i3)') "cudecomp:, rank:", rank
-    write(*,'(a20,3i3)') "fft_in_y(Y,X,Z):",    pinfo_T1_y%shape(1), pinfo_T1_y%shape(2), pinfo_T1_y%shape(3)
-    write(*,'(a20,3i3)') "buffer1(Y,X,Z):",      pinfo_T1_y%shape(1)/2+1, pinfo_T1_y%shape(2), pinfo_T1_y%shape(3)
-    write(*,'(a20,3i3)') "real_buffer1(Y,X,Z):",pinfo_T2_y%shape(1), pinfo_T2_y%shape(2), pinfo_T2_y%shape(3)
-    write(*,'(a20,3i3)') "fft_in_x(X,Z,Y) B :",    pinfo_T2_z%shape(1), pinfo_T2_z%shape(2), pinfo_T2_z%shape(3)
-    write(*,'(a20,3i3)') "buffer2(x,z,y):",     pinfo_T2_z%shape(1)/2+1, pinfo_T2_z%shape(2), pinfo_T2_z%shape(3)
-    write(*,'(a20,3i3)') "real_buffer2(x,z,y):",pinfo_T3_z%shape(1), pinfo_T3_z%shape(2), pinfo_T3_z%shape(3)
-    write(*,'(a20,3i3)') "real_buffer3(y,x,z):",pinfo_T3_y%shape(1), pinfo_T3_y%shape(2), pinfo_T3_y%shape(3)
-
-    !cy1= pinfo_T1_y%shape(1)
-    !cy2= pinfo_T1_y%shape(2)
-    !cy3= pinfo_T1_y%shape(3)
-    !cx1= pinfo_T1_x%shape(1)
-    !cx2= pinfo_T1_x%shape(2)
-    !cx3= pinfo_T1_x%shape(3)
-    !write(*,'(a3,i4,5(a4,i4))') "cx1:", cx1, ", cx2:", cx2, ", cx3:", cx3, "cy1:", cy1, ", cy2:", cy2, ", cy3:", cy3
     allocate(fft_in_y_buffer(pinfo_T1_y%shape(1), pinfo_T1_y%shape(2), pinfo_T1_y%shape(3)))
     allocate(buffer1(pinfo_T1_y%shape(1)/2+1, pinfo_T1_y%shape(2), pinfo_T1_y%shape(3)))
     allocate(real_buffer1((pinfo_T2_y%shape(1)), pinfo_T2_y%shape(2), pinfo_T2_y%shape(3)))
@@ -532,17 +352,6 @@ contains
     
     allocate(real_buffer3(pinfo_T3_y%shape(1), pinfo_T3_y%shape(2), pinfo_T3_y%shape(3)))
 #endif
-
-    call print_shape_r(fft_in_y_buffer, "fft_in_y_buffer")
-    call print_shape_c(buffer1, "buffer1")
-    call print_shape_r(real_buffer1, "real_buffer1")
-
-    call print_shape_r(fft_in_x_buffer, "fft_in_x_buffer")
-    call print_shape_c(buffer2,"buffer2")
-    call print_shape_r(real_buffer2,"real_buffer2")
-    
-    
-    call print_shape_r(real_buffer3, "real_buffer3") ! -> target_data
   end subroutine initialise_buffers
 
   !> Initialises the pencil transpositions, from a pencil in one dimension to that in another
@@ -652,37 +461,15 @@ contains
 #ifndef CUDECOMP
     call transpose_to_pencil(y_from_z_transposition, (/Z_INDEX, Y_INDEX, X_INDEX/), dim_y_comm, FORWARD, &
        source_data, fft_in_y_buffer)
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_z with monc (Forward)"
 #else
     call transpose_z_to_y_cudecomp_T1(source_data, fft_in_y_buffer)
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_z with cudecomp (Forward), T1"
 #endif
-    
     call perform_r2c_fft(fft_in_y_buffer, buffer, y_from_z_transposition%my_pencil_size(Y_INDEX), &
          y_from_z_transposition%my_pencil_size(X_INDEX) * y_from_z_transposition%my_pencil_size(Z_INDEX), 1)
     call convert_complex_to_real(buffer, real_buffer)
   end subroutine transpose_and_forward_fft_in_y
 
 #ifdef CUDECOMP
-  subroutine transpose_z_to_y_cudecomp(source_data, dest_data)
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: dest_data
-    integer :: istat, n1, n2, n3, n1_d, n2_d, n3_d
-    ! x-pointer to gpu cudecomp data
-    n1=size(source_data,1); n2=size(source_data,2); n3=size(source_data,3)
-    n1_d=size(data_cudecomp_T1_x_d,1); n2_d=size(data_cudecomp_T1_x_d,2); n3_d=size(data_cudecomp_T1_x_d,3)
-    write(*,'(a44,6i4)') "[DEBUG] in - n1, n2, n3, n1_d, n2_d, n3_d:",n1, n2, n3, n1_d, n2_d, n3_d
-    data_cudecomp_T1_x_d = source_data
-    ! Use x-y instead of z-y because monc z direction is equivalent to cudecomp x direction
-    istat = cudecompTransposeXToY(handle_cudecomp_T1, grid_desc_cudecomp_T1, data_cudecomp_d, data_cudecomp_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
-
-    n1=size(dest_data,1); n2=size(dest_data,2); n3=size(dest_data,3)
-    n1_d=size(data_cudecomp_T1_y_d,1); n2_d=size(data_cudecomp_T1_y_d,2); n3_d=size(data_cudecomp_T1_y_d,3)
-    write(*,'(a44,6i4)') "[DEBUG] out - n1, n2, n3, n1_d, n2_d, n3_d:",n1, n2, n3, n1_d, n2_d, n3_d
-    ! y-pointer to gpu cudecomp data
-    dest_data = data_cudecomp_T1_y_d
-  end subroutine transpose_z_to_y_cudecomp    
-
   subroutine transpose_z_to_y_cudecomp_T1(source_data, dest_data)
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: source_data
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: dest_data
@@ -801,10 +588,8 @@ contains
 #ifndef CUDECOMP
     call transpose_to_pencil(y_from_x_2_transposition, (/X_INDEX, Z_INDEX, Y_INDEX/), dim_x_comm, BACKWARD, &
        fft_in_x_buffer, real_buffer)
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_x_2 with monc (Backward)"
 #else
-    call transpose_x_to_y_cudecomp_T2(fft_in_x_buffer, real_buffer) !< this doesn't work!!!
-    if (rank==0) write(*,*) "[DEBUG] Transpose y_from_x_2 with cudecomp (Backward), T2"
+    call transpose_x_to_y_cudecomp_T2(fft_in_x_buffer, real_buffer)
 #endif
   end subroutine transpose_and_backward_fft_in_x
 
@@ -822,16 +607,12 @@ contains
     ! Go from global Y pencil to global X pencil
 #ifndef CUDECOMP
     call transpose_to_pencil(x_from_y_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_x_comm, FORWARD, &
-       buffer1, fft_in_x_buffer)   
-    if (rank==0) write(*,*) "[DEBUG] Transpose x_from_y with monc (Forward)"
+       buffer1, fft_in_x_buffer)
 #else
-    call transpose_y_to_x_cudecomp_T2(buffer1, fft_in_x_buffer) !< not working
-    if (rank==0) write(*,*) "[DEBUG] Transpose x_from_y with cudecomp (Forward), T2"
+    call transpose_y_to_x_cudecomp_T2(buffer1, fft_in_x_buffer)
 #endif
-    
     call perform_r2c_fft(fft_in_x_buffer, buffer2, x_from_y_transposition%my_pencil_size(X_INDEX), &
          x_from_y_transposition%my_pencil_size(Y_INDEX) * x_from_y_transposition%my_pencil_size(Z_INDEX), 3)
-
     call convert_complex_to_real(buffer2, buffer3)
   end subroutine transpose_and_forward_fft_in_x
 
@@ -857,10 +638,8 @@ contains
 #ifndef CUDECOMP
     call transpose_to_pencil(z_from_y_2_transposition, (/Y_INDEX, X_INDEX, Z_INDEX/), dim_y_comm, BACKWARD, &
        fft_in_y_buffer, real_buffer)
-    if (rank==0) write(*,*) "[DEBUG] Transpose z_from_y_2 with monc (Backward)"
 #else
     call transpose_y_to_z_cudecomp_T1(fft_in_y_buffer, real_buffer)
-    if (rank==0) write(*,*) "[DEBUG] Transpose z_from_y_2 with cudecomp (Backward), T1"
 #endif
   end subroutine transpose_and_backward_fft_in_y
 
