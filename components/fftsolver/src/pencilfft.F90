@@ -293,6 +293,102 @@ contains
 #endif
   end subroutine perform_forward_3dfft
 
+#ifdef CUDECOMP
+  !> Perform 3D FFT on GPU using cuDecomp and cuFFT. 
+  !! Data remains on the GPU for the whole subroutine.
+  !!
+  !! Transforms data from (Z, Y, X) to (Z, Y^, X^).
+  !! Operations: Transpose to Y, FFT in Y, Transpose to X, FFT in X, transpose to Y, Transpose to Z.
+  !! @param current_state The current model state
+  !! @param source_data Source data, in real space
+  !! @param target_data Output data, in spectral space for Y and X. 
+  subroutine perform_forward_3dfft_cd(current_state, source_data, target_data)
+    type(model_state_type), target, intent(inout) :: current_state
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, intent(inout) :: source_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, intent(inout) :: target_data
+    complex(C_DOUBLE_COMPLEX), dimension(:,:,:), device, allocatable :: buffer1_d, buffer2_d
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, allocatable :: real_buffer1_d, real_buffer2_d
+    integer :: ncols, n1, n2, n3, plan_id, istat, i, j, k
+
+    allocate(buffer1_d(pinfo_T1_y%shape(1)/2+1, pinfo_T1_y%shape(2), pinfo_T1_y%shape(3)))
+    allocate(real_buffer1_d((pinfo_T2_y%shape(1)), pinfo_T2_y%shape(2), pinfo_T2_y%shape(3)))
+
+    plan_id=1
+    n1=size(data_cudecomp_T1_y_d, 1)
+    n2=size(data_cudecomp_T1_y_d, 2)
+    n3=size(data_cudecomp_T1_y_d, 3)
+    ncols=n2*n3
+
+    ! Transpose and forward fft in y
+    ! transpose x to y, as Z-direction in monc is equivalent to cudecomp X direction
+    istat = cudecompTransposeXToY(handle_cudecomp_T1, grid_desc_cudecomp_T1, source_data, data_cudecomp_T1_y_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+    ! fft in Y
+    ! check for plan and create
+    if (.not. plan_defined(plan_id)) then
+      istat = cufftPlan1d(plans(plan_id), n1, CUFFT_D2Z, ncols)
+      plan_defined(plan_id) = .true.
+    end if
+    ! perform fft
+    istat = cufftExecD2Z(plans(plan_id), data_cudecomp_T1_y_d, buffer1_d)
+    ! complex to real
+    !$cuf kernel do(3) <<<*,*>>>
+    do k=1,size(real_buffer1_d,3)
+      do j=1,size(real_buffer1_d, 2)
+        do i=1,size(real_buffer1_d, 1),2
+          real_buffer1_d(i,j,k) = real(real(buffer1_d((i+1)/2,j,k)), kind=DEFAULT_PRECISION)
+          real_buffer1_d(i+1,j,k) = real(aimag(buffer1_d((i+1)/2,j,k)), kind=DEFAULT_PRECISION)
+        end do
+      end do
+    end do
+
+    deallocate(buffer1_d)
+
+    ! Transpose and forward fft in x
+    ! Transpose y to Z, as X- direction in monc is equivalent to cudecomp Z direction
+    istat = cudecompTransposeYToZ(handle_cudecomp_T1, grid_desc_cudecomp_T2, real_buffer1_d, data_cudecomp_T2_z_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+    ! fft in X
+
+    deallocate(real_buffer1_d)
+
+    allocate(buffer2_d(pinfo_T2_z%shape(1)/2+1, pinfo_T2_z%shape(2), pinfo_T2_z%shape(3)))
+    allocate(real_buffer2_d((pinfo_T3_z%shape(1)), pinfo_T3_z%shape(2), pinfo_T3_z%shape(3)))
+    
+    plan_id=3
+    n1 = size(data_cudecomp_T2_z_d, 1)
+    n2 = size(data_cudecomp_T2_z_d, 2)
+    n3 = size(data_cudecomp_T2_z_d, 3)
+    ncols=n2*n3
+    ! check for plan and create
+    if (.not. plan_defined(plan_id)) then
+      istat = cufftPlan1d(plans(plan_id), n1, CUFFT_D2Z, ncols)
+      plan_defined(plan_id) = .true.
+    end if
+    ! perform fft
+    istat = cufftExecD2Z(plans(plan_id), data_cudecomp_T2_z_d, buffer2_d)
+    ! complex to real
+    !$cuf kernel do(3) <<<*,*>>>
+    do k=1,size(real_buffer2_d,3)
+      do j=1,size(real_buffer2_d, 2)
+        do i=1,size(real_buffer2_d, 1),2
+          real_buffer2_d(i,j,k) = real(real(buffer2_d((i+1)/2,j,k)), kind=DEFAULT_PRECISION)
+          real_buffer2_d(i+1,j,k) = real(aimag(buffer2_d((i+1)/2,j,k)), kind=DEFAULT_PRECISION)
+        end do
+      end do
+    end do
+
+    deallocate(buffer2_d)
+
+    !transpose x to y
+    istat = cudecompTransposeZtoY(handle_cudecomp_T1, grid_desc_cudecomp_T3, real_buffer2_d, data_cudecomp_T3_y_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+
+    deallocate(real_buffer2_d)
+
+    ! transpose y to z
+    istat = cudecompTransposeYToX(handle_cudecomp_T1, grid_desc_cudecomp_T3, data_cudecomp_T3_x_d, target_data, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+
+  end subroutine perform_forward_3dfft_cd
+#endif
+
   !> Performs a backwards 3D FFT and currently results in target data which is the X, Z, Y oriented pencil
   !! Note that the source_data here takes no account for the halo, it is up to caller to exclude this.
   !! This does no FFT in Z, but transposes to Y, does FFT in Y, then transposes to X and 

@@ -5,7 +5,8 @@ module fftsolver_mod
   use grids_mod, only : X_INDEX, Y_INDEX, Z_INDEX
   use state_mod, only : model_state_type
   use monc_component_mod, only : component_descriptor_type
-  use pencil_fft_mod, only : initialise_pencil_fft, finalise_pencil_fft, perform_forward_3dfft, perform_backwards_3dfft
+  use pencil_fft_mod, only : initialise_pencil_fft, finalise_pencil_fft, perform_forward_3dfft, perform_backwards_3dfft, &
+                           & perform_forward_3dfft_cd
   use communication_types_mod, only : halo_communication_type, neighbour_description_type, field_data_wrapper_type
   use halo_communication_mod, only : copy_buffer_to_field, copy_field_to_buffer, perform_local_data_copy_for_field, &
        init_halo_communication, finalise_halo_communication, blocking_halo_swap, get_single_field_per_halo_cell
@@ -130,7 +131,9 @@ contains
     type(model_state_type), target, intent(inout) :: current_state
     integer ipi, ipj, ipk
     integer :: start_loc(3), end_loc(3), i
-
+#ifdef CUDECOMP
+    real(kind=DEFAULT_PRECISION), allocatable, device, dimension(:,:,:) :: in_d, out_d
+#endif
     do i=1,3
       start_loc(i)=current_state%local_grid%local_domain_start_index(i)
       end_loc(i)=current_state%local_grid%local_domain_end_index(i)
@@ -143,8 +146,17 @@ contains
     current_state%p%data=real(current_state%parallel%my_rank, kind=8) + 1.d0
 #endif
 
+#ifdef CUDECOMP
+    allocate(in_d(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))
+    in_d = current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
+    allocate(out_d(size(pt, 1), size(pt, 2), size(pt, 3)))
+    call perform_forward_3dfft_cd(current_state, in_d, out_d)
+    pt = out_d
+    deallocate(in_d, out_d)
+#else
     call perform_forward_3dfft(current_state, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
          start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)), pt)
+#endif
 
 #ifndef FFT_TEST_MODE
     call tridiagonal_solver(current_state, pt, fourier_space_sizes)
