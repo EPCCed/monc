@@ -384,7 +384,7 @@ contains
     deallocate(real_buffer2_d)
 
     ! transpose y to z
-    istat = cudecompTransposeYToX(handle_cudecomp_T1, grid_desc_cudecomp_T3, data_cudecomp_T3_x_d, target_data, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+    istat = cudecompTransposeYToX(handle_cudecomp_T1, grid_desc_cudecomp_T3, data_cudecomp_T3_y_d, target_data, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
 
   end subroutine perform_forward_3dfft_cd
 #endif
