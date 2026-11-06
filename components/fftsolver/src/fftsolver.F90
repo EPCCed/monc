@@ -147,10 +147,14 @@ contains
 #endif
 
 #ifdef CUDECOMP
+    ! allocate gpu arrays
     allocate(real_d(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))
-    real_d = current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
     allocate(spec_d(size(pt, 1), size(pt, 2), size(pt, 3)))
+    ! move data to gpu
+    real_d = current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
+    ! do forward 3dfft on gpu
     call perform_forward_3dfft_cd(current_state, real_d, spec_d)
+    ! move data to ram
     pt = spec_d
 #else
     call perform_forward_3dfft(current_state, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
@@ -166,9 +170,13 @@ contains
     ! worth trying that first. Operating on the size of pt rather than grid sizes. Downside of real space xform is then we have +1
     ! in the forwards transformation    
 #ifdef CUDECOMP
+    ! move data to gpu
     spec_d = pt
-    call perform_backwards_3dfft_cd(current_state, spec_d, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
-        & start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))
+    ! do backward 3d fft on gpu
+    call perform_backwards_3dfft_cd(current_state, spec_d, real_d)
+    ! move data back to ram
+    current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX),start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)) =&
+        & real_d(start_loc(Z_INDEX):end_loc(Z_INDEX),start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
 #else
     call perform_backwards_3dfft(current_state, pt, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
          start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))   

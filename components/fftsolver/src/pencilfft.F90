@@ -431,18 +431,15 @@ contains
   subroutine perform_backwards_3dfft_cd(current_state, source_data, target_data)
     type(model_state_type), target, intent(inout) :: current_state
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout), device :: source_data
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: target_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout), device :: target_data
 #ifdef CUDECOMP
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, allocatable :: source_data_d, real_buffer1_d, target_data_d
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, allocatable :: source_data_d, real_buffer1_d
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, allocatable :: real_buffer3_d, real_buffer2_d, fft_in_x_buffer_d, fft_in_y_buffer_d
-    !complex(C_DOUBLE_COMPLEX), dimension(:,:,:), device, allocatable :: buffer2_d
     complex*16, dimension(:,:,:), device, allocatable :: buffer2_d, buffer1_d
     integer :: istat, i, j, k, n1, n2, n3, ncols, plan_id, ii
-    logical :: in_subroutine, all_subroutine
     integer :: in_subroutine_type, ncols2, ncols3, row_size
 
     allocate(source_data_d    (size(source_data,1),     size(source_data,2),     size(source_data,3)))
-    allocate(target_data_d    (size(target_data,1),     size(target_data,2),     size(target_data,3)))
     allocate(real_buffer3_d   (size(real_buffer3,1),    size(real_buffer3,2),    size(real_buffer3,3)))
     allocate(real_buffer2_d   (size(real_buffer2,1),    size(real_buffer2,2),    size(real_buffer2,3)))
     allocate(buffer2_d        (size(buffer2,1),         size(buffer2     ,2),    size(buffer2,3)))
@@ -477,7 +474,6 @@ contains
     if (.not. plan_defined(plan_id)) then
       istat = cufftPlan1d(plans(plan_id), n1, CUFFT_Z2D, ncols)
       plan_defined(plan_id) = .true.
-      write (*,*) "[DEBUG]: Created iFFT in X plan (gpu arrays)"
     end if
     ! perform ifft in X ()
     istat = cufftExecZ2D(plans(plan_id), buffer2_d, fft_in_x_buffer_d)
@@ -496,12 +492,9 @@ contains
 
     !-- Transpose x to y (use cudecomp Z to Y because monc Z is cudecomp X)
     istat = cudecompTransposeZToY(handle_cudecomp_T1, grid_desc_cudecomp_T2, fft_in_x_buffer_d, real_buffer1_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
-    write(*,'(a50,i2,a8,i2)') "[DEBUG]: done transpose X to Y (GPU arrays), rank:", rank, ", istat:", istat
     
-    !real_buffer1 = real_buffer1_d
     !--------------------------------------------------------------------------------------
     ! real to complex
-
     !$cuf kernel do(3) <<<*,*>>>
     do k=1,size(real_buffer1_d,3)
       do j=1,size(real_buffer1_d,2)
@@ -521,7 +514,6 @@ contains
     if (.not. plan_defined(plan_id)) then
       istat = cufftPlan1d(plans(plan_id), n1, CUFFT_Z2D, ncols)
       plan_defined(plan_id) = .true.
-      write (*,*) "[DEBUG]: Created iFFT in Y plan (gpu arrays)"
     end if
     ! perform ifft in y ()
     istat = cufftExecZ2D(plans(plan_id), buffer1_d, fft_in_y_buffer_d)
@@ -537,11 +529,7 @@ contains
     enddo
 
     !-- Transpose y to z (use cudecomp y to x because monc z is cudecomp x)
-    istat = cudecompTransposeYToX(handle_cudecomp_T1, grid_desc_cudecomp_T1, fft_in_y_buffer_d, target_data_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
-    write(*,'(a50,i2,a8,i2)') "[DEBUG]: done transpose Y to Z (GPU arrays), rank:", rank, ", istat:", istat
-    !-- Move data back to host
-    target_data = target_data_d
-
+    istat = cudecompTransposeYToX(handle_cudecomp_T1, grid_desc_cudecomp_T1, fft_in_y_buffer_d, target_data, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
 #endif
   end subroutine perform_backwards_3dfft_cd
 
