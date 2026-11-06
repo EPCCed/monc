@@ -6,7 +6,7 @@ module fftsolver_mod
   use state_mod, only : model_state_type
   use monc_component_mod, only : component_descriptor_type
   use pencil_fft_mod, only : initialise_pencil_fft, finalise_pencil_fft, perform_forward_3dfft, perform_backwards_3dfft, &
-                           & perform_forward_3dfft_cd
+                           & perform_forward_3dfft_cd, perform_backwards_3dfft_cd
   use communication_types_mod, only : halo_communication_type, neighbour_description_type, field_data_wrapper_type
   use halo_communication_mod, only : copy_buffer_to_field, copy_field_to_buffer, perform_local_data_copy_for_field, &
        init_halo_communication, finalise_halo_communication, blocking_halo_swap, get_single_field_per_halo_cell
@@ -132,7 +132,7 @@ contains
     integer ipi, ipj, ipk
     integer :: start_loc(3), end_loc(3), i
 #ifdef CUDECOMP
-    real(kind=DEFAULT_PRECISION), allocatable, device, dimension(:,:,:) :: in_d, out_d
+    real(kind=DEFAULT_PRECISION), allocatable, device, dimension(:,:,:) :: real_d, spec_d
 #endif
     do i=1,3
       start_loc(i)=current_state%local_grid%local_domain_start_index(i)
@@ -147,12 +147,11 @@ contains
 #endif
 
 #ifdef CUDECOMP
-    allocate(in_d(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))
-    in_d = current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
-    allocate(out_d(size(pt, 1), size(pt, 2), size(pt, 3)))
-    call perform_forward_3dfft_cd(current_state, in_d, out_d)
-    pt = out_d
-    deallocate(in_d, out_d)
+    allocate(real_d(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))
+    real_d = current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
+    allocate(spec_d(size(pt, 1), size(pt, 2), size(pt, 3)))
+    call perform_forward_3dfft_cd(current_state, real_d, spec_d)
+    pt = spec_d
 #else
     call perform_forward_3dfft(current_state, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
          start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)), pt)
@@ -166,8 +165,14 @@ contains
     ! as require that complex number - not sure the best approach. We can extract the values here from complex anyway so
     ! worth trying that first. Operating on the size of pt rather than grid sizes. Downside of real space xform is then we have +1
     ! in the forwards transformation    
+#ifdef CUDECOMP
+    spec_d = pt
+    call perform_backwards_3dfft_cd(current_state, spec_d, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
+        & start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))
+#else
     call perform_backwards_3dfft(current_state, pt, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
          start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))   
+#endif
 
 
     ! p filter

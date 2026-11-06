@@ -50,6 +50,7 @@ module pencil_fft_mod
   complex(C_DOUBLE_COMPLEX), dimension(:,:,:), contiguous, pointer :: buffer1, buffer2
   
   public initialise_pencil_fft, finalise_pencil_fft, perform_forward_3dfft, perform_backwards_3dfft
+  public perform_forward_3dfft_cd, perform_backwards_3dfft_cd
   
   !counters for number of times the fft routines are called and the time spent in them
   integer :: nforward, nback
@@ -417,6 +418,132 @@ contains
     call transpose_and_backward_fft_in_x(current_state, real_buffer2, buffer2, real_buffer1)
     call transpose_and_backward_fft_in_y(current_state, real_buffer1, buffer1, target_data)
   end subroutine perform_backwards_3dfft
+
+
+  
+  !> Performs a backwards 3D FFT on GPU using cuFFT and cuDecomp.
+  !!
+  !! Transforms data from (Z, Y^, X^) to (Z, Y, X).
+  !! Operations: Transpose to Y, Transpose to X, iFFT in X, Transpose to Y, iFFT in Y, transpose to Z
+  !! @param current_state The current model state
+  !! @param source_data Source data, GPU, in spectral space for Y and X
+  !! @param target_data Output data, CPU, in real space.
+  subroutine perform_backwards_3dfft_cd(current_state, source_data, target_data)
+    type(model_state_type), target, intent(inout) :: current_state
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout), device :: source_data
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: target_data
+#ifdef CUDECOMP
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, allocatable :: source_data_d, real_buffer1_d, target_data_d
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), device, allocatable :: real_buffer3_d, real_buffer2_d, fft_in_x_buffer_d, fft_in_y_buffer_d
+    !complex(C_DOUBLE_COMPLEX), dimension(:,:,:), device, allocatable :: buffer2_d
+    complex*16, dimension(:,:,:), device, allocatable :: buffer2_d, buffer1_d
+    integer :: istat, i, j, k, n1, n2, n3, ncols, plan_id, ii
+    logical :: in_subroutine, all_subroutine
+    integer :: in_subroutine_type, ncols2, ncols3, row_size
+
+    allocate(source_data_d    (size(source_data,1),     size(source_data,2),     size(source_data,3)))
+    allocate(target_data_d    (size(target_data,1),     size(target_data,2),     size(target_data,3)))
+    allocate(real_buffer3_d   (size(real_buffer3,1),    size(real_buffer3,2),    size(real_buffer3,3)))
+    allocate(real_buffer2_d   (size(real_buffer2,1),    size(real_buffer2,2),    size(real_buffer2,3)))
+    allocate(buffer2_d        (size(buffer2,1),         size(buffer2     ,2),    size(buffer2,3)))
+    allocate(fft_in_x_buffer_d(size(fft_in_x_buffer,1), size(fft_in_x_buffer,2), size(fft_in_x_buffer,3)))
+    allocate(real_buffer1_d   (size(real_buffer1,1),    size(real_buffer1,2),    size(real_buffer1,3)))
+    allocate(buffer1_d        (size(buffer1,1),         size(buffer1     ,2),    size(buffer1,3)))
+    allocate(fft_in_y_buffer_d(size(fft_in_y_buffer,1), size(fft_in_y_buffer,2), size(fft_in_y_buffer,3)))
+
+    !-- Transpose Z to Y
+    istat = cudecompTransposeXToY(handle_cudecomp_T1, grid_desc_cudecomp_T3, source_data, real_buffer3_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+
+    !-- Transpose Y to X
+    istat = cudecompTransposeYToZ(handle_cudecomp_T1, grid_desc_cudecomp_T3, real_buffer3_d, real_buffer2_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+    
+    !-- Real to Complex
+    !$cuf kernel do(3) <<<*,*>>>
+    do k=1,size(real_buffer2_d,3)
+      do j=1,size(real_buffer2_d,2)
+        do i=1,size(real_buffer2_d,1),2
+          buffer2_d((i+1)/2,j,k)=cmplx(real_buffer2_d(i,j,k), real_buffer2_d(i+1,j,k), kind=C_DOUBLE_COMPLEX)
+        end do
+      end do
+    end do
+    
+    !-- iFFT in X
+    plan_id = 2
+    n1 = x_from_y_2_transposition%my_pencil_size(X_INDEX)-2
+    n2 = size(buffer2_d,2)
+    n3 = size(buffer2_d,3)
+    ncols = x_from_y_2_transposition%my_pencil_size(Y_INDEX) * x_from_y_2_transposition%my_pencil_size(Z_INDEX)
+    ! check for plan and create
+    if (.not. plan_defined(plan_id)) then
+      istat = cufftPlan1d(plans(plan_id), n1, CUFFT_Z2D, ncols)
+      plan_defined(plan_id) = .true.
+      write (*,*) "[DEBUG]: Created iFFT in X plan (gpu arrays)"
+    end if
+    ! perform ifft in X ()
+    istat = cufftExecZ2D(plans(plan_id), buffer2_d, fft_in_x_buffer_d)
+    ! X, Z, Y^r
+    ii = cudaDeviceSynchronize()
+
+    !-- Normalize
+    !$cuf kernel do(3) <<<*,*>>>
+    do k=1,size(fft_in_x_buffer_d,3)
+      do j=1,size(fft_in_x_buffer_d,2)
+        do i=1,size(fft_in_x_buffer_d,1)
+          fft_in_x_buffer_d(i,j,k) = fft_in_x_buffer_d(i,j,k) / n1
+        enddo
+      end do
+    enddo
+
+    !-- Transpose x to y (use cudecomp Z to Y because monc Z is cudecomp X)
+    istat = cudecompTransposeZToY(handle_cudecomp_T1, grid_desc_cudecomp_T2, fft_in_x_buffer_d, real_buffer1_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+    write(*,'(a50,i2,a8,i2)') "[DEBUG]: done transpose X to Y (GPU arrays), rank:", rank, ", istat:", istat
+    
+    !real_buffer1 = real_buffer1_d
+    !--------------------------------------------------------------------------------------
+    ! real to complex
+
+    !$cuf kernel do(3) <<<*,*>>>
+    do k=1,size(real_buffer1_d,3)
+      do j=1,size(real_buffer1_d,2)
+        do i=1,size(real_buffer1_d,1),2
+          buffer1_d((i+1)/2,j,k)=cmplx(real_buffer1_d(i,j,k), real_buffer1_d(i+1,j,k), kind=C_DOUBLE_COMPLEX)
+        end do
+      end do
+    end do
+
+    !-- iFFT in Y
+    plan_id = 4
+    n1 = y_from_x_2_transposition%my_pencil_size(Y_INDEX)-2
+    n2 = size(buffer1_d,2)
+    n3 = size(buffer1_d,3)
+    ncols = y_from_x_2_transposition%my_pencil_size(X_INDEX) * y_from_x_2_transposition%my_pencil_size(Z_INDEX)
+    ! check for plan and create
+    if (.not. plan_defined(plan_id)) then
+      istat = cufftPlan1d(plans(plan_id), n1, CUFFT_Z2D, ncols)
+      plan_defined(plan_id) = .true.
+      write (*,*) "[DEBUG]: Created iFFT in Y plan (gpu arrays)"
+    end if
+    ! perform ifft in y ()
+    istat = cufftExecZ2D(plans(plan_id), buffer1_d, fft_in_y_buffer_d)
+
+    !-- Normalize
+    !$cuf kernel do(3) <<<*,*>>>
+    do k=1,size(fft_in_y_buffer_d,3)
+      do j=1,size(fft_in_y_buffer_d,2)
+        do i=1,size(fft_in_y_buffer_d,1)
+          fft_in_y_buffer_d(i,j,k) = fft_in_y_buffer_d(i,j,k) / n1
+        enddo
+      end do
+    enddo
+
+    !-- Transpose y to z (use cudecomp y to x because monc z is cudecomp x)
+    istat = cudecompTransposeYToX(handle_cudecomp_T1, grid_desc_cudecomp_T1, fft_in_y_buffer_d, target_data_d, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+    write(*,'(a50,i2,a8,i2)') "[DEBUG]: done transpose Y to Z (GPU arrays), rank:", rank, ", istat:", istat
+    !-- Move data back to host
+    target_data = target_data_d
+
+#endif
+  end subroutine perform_backwards_3dfft_cd
 
   !> Initialises memory for the buffers used in the FFT
   !
