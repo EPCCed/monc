@@ -14,11 +14,19 @@ module fftsolver_mod
   use logging_mod, only : LOG_ERROR, log_master_log
   use mpi, only : MPI_REQUEST_NULL, MPI_STATUSES_IGNORE
   use optionsdatabase_mod, only : options_get_integer, options_get_logical, options_get_real
+#ifdef CUDA
+  use cudafor
+#endif
+#ifdef CUDECOMP
+  use cudecomp
+#endif
+
   implicit none
 
 #ifndef TEST_MODE
   private
 #endif
+
 
   real(kind=DEFAULT_PRECISION), dimension(:), allocatable :: cos_x, cos_y
   real(kind=DEFAULT_PRECISION) :: PI
@@ -162,7 +170,11 @@ contains
 #endif
 
 #ifndef FFT_TEST_MODE
+#ifdef CUDECOMP
+    call tridiagonal_solver_g(current_state, pt, fourier_space_sizes)
+#else
     call tridiagonal_solver(current_state, pt, fourier_space_sizes)
+#endif
 #endif
     
     ! Here it is complex space, distributed as needed. The other option is real space but with +1 for the last process in Y
@@ -332,6 +344,132 @@ contains
       end do           
     end if
   end subroutine tridiagonal_solver
+
+#ifdef CUDECOMP
+  !> Does the tridiagonal solve on the gpu.
+  !! pressure_term_d layout should be (in monc dimensions): Z, Yhat, Xhat,
+  !! with Z from 1 to nz, Yhat from 1 to ny, and Xhat from 1 to nx.
+  !! Within this subroutine, x and z are sometimes mixed, as Z is contiguous in monc, but 
+  !! cuda calls the contiguous dimension X
+  attributes(global) subroutine gpu_solve(pressure_term_d, cos_x_d, cos_y_d, cza_d, czb_d, czg_d, czh_d,&
+                                          & nx, ny, nz, startX, startY)
+    implicit none
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: pressure_term_d
+    real(kind=DEFAULT_PRECISION), dimension(:), intent(in) :: cos_x_d, cos_y_d, cza_d, czg_d, czh_d, czb_d ! predefined arrays
+    
+    integer, value :: nx, ny, nz, startX, startY
+
+    ! thread private variables
+    real(kind=DEFAULT_PRECISION) :: b_d(nz), b1_d(nz), s_d(nz), s1_d(nz) ! work arrays
+    integer :: i, j, k, j_start
+    real(kind=DEFAULT_PRECISION) :: cij_d
+
+    ! x and z are mixed up a bit, because x is the first index of a cuda array, but that first index
+    ! is Z for the monc arrays we are acting on
+    i = blockDim%z * (blockIdx%z-1) + threadIdx%z
+    j = blockDim%y * (blockIdx%y-1) + threadIdx%y
+
+    if (i <= nx ) then
+      j_start = merge(3, 1, startY == 1 .and.  startX == 1 .and. i .lt. 3)
+      if ( j >= j_start .and. j <= ny) then
+        cij_d = cos_x_d(i) + cos_y_d(j)
+        b_d(2) = cij_d - cza_d(2)
+        b1_d(2) = 1.0_DEFAULT_PRECISION/b_d(2)
+        s1_d(2) = pressure_term_d(2,j,i)
+        do k=3, nz
+          b_d(k) = cij_d+czg_d(k)
+          b1_d(k)=1.0_DEFAULT_PRECISION/(b_d(k)-czh_d(k)*b1_d(k-1))
+          s1_d(k)=pressure_term_d(k,j,i)-czb_d(k)*s1_d(k-1)*b1_d(k-1)
+        end do
+
+        pressure_term_d( nz, j, i) = s1_d(nz) * b1_d(nz)
+
+        do k = nz-1, 2, -1
+          pressure_term_d(k, j, i) = (s1_d(k) - cza_d(k)*pressure_term_d(k+1, j, i)) * b1_d(k)
+        end do
+      end if
+    end if 
+
+    if (startY == 1 .and. startX == 1) then
+      if ( (i==1 .or. i==2) .and. (j==1 .or. j==2)) then
+        s_d(2) = pressure_term_d(2,j,i)
+        pressure_term_d(1,j,i) = 0.0_DEFAULT_PRECISION
+        pressure_term_d(2,j,i) = 0.0_DEFAULT_PRECISION
+        do k=3, nz
+          s_d(k) = pressure_term_d(k, j, i)
+          pressure_term_d(k, j, i) = (s_d(k-1) - czg_d(k-1) * pressure_term_d(k-1, j, i) - &
+                                     & czb_d(k-1) * pressure_term_d(k-2,j,i)) / cza_d(k-1)
+        end do
+      end if
+    end if
+        
+  end subroutine gpu_solve
+#endif
+
+#ifdef CUDECOMP
+  !> The GPU Version of tridiagonal solver which runs in Fourier space on the pressure terms. Note that because we are going
+  !! from n reals to n/2+1 complex numbers (and into their reals for this solver) then there might be more data 
+  !! in the pressure term than in p. Therefore use the space sizes which are provided as an argument to this
+  !! procedure rather than the current state local grid dimensions
+  !!
+  !! This subroutine moves data to gpu and calls the device subroutine
+  !! gpu_solve, which does that acutal calculation
+  !!
+  !! @param current_state The current model state
+  !! @param pressure_term The pressure term in Fourier space
+  !! @param fourier_space_sizes The size of the pressure term in each dimension
+  subroutine tridiagonal_solver_g(current_state, pressure_term, fourier_space_sizes)
+    type(model_state_type), target, intent(inout) :: current_state
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: pressure_term
+    integer, intent(in) :: fourier_space_sizes(3)
+    integer :: i, j, k, j_start, ierrSync, ierrAsync
+
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable, device :: pressure_term_d
+    real(kind=DEFAULT_PRECISION), dimension(:), allocatable, device :: cos_x_d, cos_y_d
+    real(kind=DEFAULT_PRECISION), dimension(:), allocatable, device :: cza_d, czg_d, czh_d, czb_d
+
+    type(dim3) :: grid, tBlock
+
+    allocate(pressure_term_d(fourier_space_sizes(Z_INDEX), fourier_space_sizes(Y_INDEX), fourier_space_sizes(X_INDEX)))
+    allocate(cos_x_d(fourier_space_sizes(X_INDEX)))
+    allocate(cos_y_d(fourier_space_sizes(Y_INDEX)))
+    allocate(cza_d(fourier_space_sizes(Z_INDEX)))
+    allocate(czb_d(fourier_space_sizes(Z_INDEX)))
+    allocate(czg_d(fourier_space_sizes(Z_INDEX)))
+    allocate(czh_d(fourier_space_sizes(Z_INDEX)))
+
+    pressure_term_d(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))= &
+              & pressure_term(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))
+    cos_x_d(1:fourier_space_sizes(X_INDEX)) = cos_x(1:fourier_space_sizes(X_INDEX))
+    cos_y_d(1:fourier_space_sizes(Y_INDEX)) = cos_y(1:fourier_space_sizes(Y_INDEX))
+
+    cza_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%cza(1:fourier_space_sizes(Z_INDEX))
+    czb_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czb(1:fourier_space_sizes(Z_INDEX))
+    czg_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czg(1:fourier_space_sizes(Z_INDEX))
+    czh_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czh(1:fourier_space_sizes(Z_INDEX))
+
+    tBlock = dim3(1, 4, 4)
+    grid = dim3(1, (fourier_space_sizes(Y_INDEX)+tBlock%y-1) / tBlock%y-1, &
+                   (fourier_space_sizes(X_INDEX)+tBlock%z-1) / tBlock%z-1 )
+
+    
+    call gpu_solve<<<grid, tBlock >>>(pressure_term_d, cos_x_d, cos_y_d, cza_d, czb_d, czg_d, czh_d,&
+                             & fourier_space_sizes(X_INDEX), fourier_space_sizes(Y_INDEX), fourier_space_sizes(Z_INDEX),&
+                             & current_state%local_grid%start(X_INDEX), current_state%local_grid%start(Y_INDEX))
+    ierrSync = cudaGetLastError ()
+    ierrAsync = cudaDeviceSynchronize ()
+    if ( ierrSync /= cudaSuccess ) then
+      print *, 'Sync kernel error :', trim ( cudaGetErrorString ( ierrSync ))
+    end if
+    if ( ierrAsync /= cudaSuccess ) then
+      print *, 'Async kernel error :', trim ( cudaGetErrorString ( ierrAsync ))
+    end if
+
+    pressure_term(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))= &
+              & pressure_term_d(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))
+
+  end subroutine tridiagonal_solver_g
+#endif
 
   !> Copies the p field data to halo buffers for a specific process in a dimension and halo cell
   !! @param current_state The current model state
