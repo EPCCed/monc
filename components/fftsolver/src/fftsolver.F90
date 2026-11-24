@@ -11,9 +11,10 @@ module fftsolver_mod
   use halo_communication_mod, only : copy_buffer_to_field, copy_field_to_buffer, perform_local_data_copy_for_field, &
        init_halo_communication, finalise_halo_communication, blocking_halo_swap, get_single_field_per_halo_cell
   use registry_mod, only : is_component_enabled
-  use logging_mod, only : LOG_ERROR, log_master_log
-  use mpi, only : MPI_REQUEST_NULL, MPI_STATUSES_IGNORE
+  use logging_mod, only : LOG_ERROR, log_master_log, LOG_INFO, log_master_newline
+  use mpi, only : MPI_REQUEST_NULL, MPI_STATUSES_IGNORE,MPI_Wtime, mpi_comm_rank
   use optionsdatabase_mod, only : options_get_integer, options_get_logical, options_get_real
+  use conversions_mod, only : conv_to_string
 #ifdef CUDA
   use cudafor
 #endif
@@ -26,6 +27,9 @@ module fftsolver_mod
 #ifndef TEST_MODE
   private
 #endif
+
+  integer, private :: nforward, nback, ntotal, nsolve
+  real(kind=DEFAULT_PRECISION), private :: tforward, tback, ttotal, tsolve, t_model_start
 
 
   real(kind=DEFAULT_PRECISION), dimension(:), allocatable :: cos_x, cos_y
@@ -40,6 +44,15 @@ module fftsolver_mod
   real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable :: pf
   real(kind=DEFAULT_PRECISION), dimension(:,:), allocatable :: filter_coefs
   integer :: kmax
+
+#ifdef CUDECOMP
+  !real(kind=DEFAULT_PRECISION), dimension(:), allocatable, device :: cos_x_d, cos_y_d
+  !real(kind=DEFAULT_PRECISION), dimension(:), allocatable, device :: cza_d, czg_d, czh_d, czb_d
+
+  real(kind=DEFAULT_PRECISION), dimension(512), constant :: cos_x_d, cos_y_d
+  real(kind=DEFAULT_PRECISION), dimension(512), constant :: cza_d, czg_d, czh_d, czb_d
+  real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable, device :: s1_d, b1_d
+#endif
 
   public fftsolver_get_descriptor
 contains
@@ -85,7 +98,11 @@ contains
            current_state%global_grid%configuration%horizontal%dx))&
            *(cos(2.0_DEFAULT_PRECISION*PI*real(((i-1)+(my_x_start-1))/2, kind=DEFAULT_PRECISION)/&
            real(current_state%global_grid%size(X_INDEX), kind=DEFAULT_PRECISION))-1.0_DEFAULT_PRECISION)
-    end do    
+    end do 
+#ifdef CUDECOMP
+    !allocate(cos_x_d(fourier_space_sizes(X_INDEX)))
+    cos_x_d(1:fourier_space_sizes(X_INDEX)) = cos_x(1:fourier_space_sizes(X_INDEX))
+#endif
 #endif
 
 #ifdef V_ACTIVE
@@ -96,6 +113,10 @@ contains
            *(cos(2.0_DEFAULT_PRECISION*PI*real(((i-1)+(my_y_start-1))/2, kind=DEFAULT_PRECISION)/&
            real(current_state%global_grid%size(Y_INDEX), kind=DEFAULT_PRECISION))-1.0_DEFAULT_PRECISION)
     end do    
+#ifdef CUDECOMP
+    !allocate(cos_y_d(fourier_space_sizes(Y_INDEX)))
+    cos_y_d(1:fourier_space_sizes(Y_INDEX)) = cos_y(1:fourier_space_sizes(Y_INDEX))
+#endif
 #endif
     current_state%psrce_x_hs_send_request=MPI_REQUEST_NULL
     current_state%psrce_y_hs_send_request=MPI_REQUEST_NULL
@@ -131,6 +152,26 @@ contains
       end if ! filter_enabled
   end if
 
+#ifdef CUDECOMP
+    allocate(s1_d(fourier_space_sizes(Z_INDEX), fourier_space_sizes(Y_INDEX), fourier_space_sizes(X_INDEX)))
+    allocate(b1_d(fourier_space_sizes(Z_INDEX), fourier_space_sizes(Y_INDEX), fourier_space_sizes(X_INDEX)))
+    cza_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%cza(1:fourier_space_sizes(Z_INDEX))
+    czb_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czb(1:fourier_space_sizes(Z_INDEX))
+    czg_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czg(1:fourier_space_sizes(Z_INDEX))
+    czh_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czh(1:fourier_space_sizes(Z_INDEX))
+#endif
+
+    nforward = 0
+    nback = 0
+    ntotal = 0
+    tforward = 0 
+    tback = 0 
+    ttotal = 0
+    nsolve = 0
+    tsolve = 0
+
+    t_model_start = MPI_Wtime()
+
   end subroutine initialisation_callback  
 
   !> Timestep call back, which will transform to Fourier space, do a tridiagonal solve and then back into time space
@@ -138,7 +179,8 @@ contains
   subroutine timestep_callback(current_state)
     type(model_state_type), target, intent(inout) :: current_state
     integer ipi, ipj, ipk
-    integer :: start_loc(3), end_loc(3), i
+    integer :: start_loc(3), end_loc(3), i, ii
+    real(kind=DEFAULT_PRECISION) :: tstart, tstop, t1, t2
 #ifdef CUDECOMP
     real(kind=DEFAULT_PRECISION), allocatable, device, dimension(:,:,:) :: real_d, spec_d
 #endif
@@ -154,6 +196,7 @@ contains
     current_state%p%data=real(current_state%parallel%my_rank, kind=8) + 1.d0
 #endif
 
+    tstart = MPI_Wtime()
 #ifdef CUDECOMP
     ! allocate gpu arrays
     allocate(real_d(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))
@@ -162,37 +205,58 @@ contains
     real_d = current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
     ! do forward 3dfft on gpu
     call perform_forward_3dfft_cd(current_state, real_d, spec_d)
+#ifndef CUDECOMP2
     ! move data to ram
     pt = spec_d
+#endif
 #else
     call perform_forward_3dfft(current_state, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
          start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)), pt)
 #endif
+    t1 = MPI_Wtime()
+    tforward = tforward + (t1 - tstart)
+    nforward = nforward + 1
 
+    t1 = MPI_Wtime()
 #ifndef FFT_TEST_MODE
-#ifdef CUDECOMP
-    call tridiagonal_solver_g(current_state, pt, fourier_space_sizes)
+#ifdef CUDECOMP2
+    ii = cudaDeviceSynchronize()
+    t1 = MPI_Wtime()
+    call tridiagonal_solver_g(current_state, spec_d, fourier_space_sizes)
+    ii = cudaDeviceSynchronize()
 #else
     call tridiagonal_solver(current_state, pt, fourier_space_sizes)
 #endif
 #endif
-    
+    t2 = MPI_Wtime()
+    tsolve = tsolve + (t2 - t1)
+    nsolve = nsolve + 1
     ! Here it is complex space, distributed as needed. The other option is real space but with +1 for the last process in Y
     ! as require that complex number - not sure the best approach. We can extract the values here from complex anyway so
     ! worth trying that first. Operating on the size of pt rather than grid sizes. Downside of real space xform is then we have +1
-    ! in the forwards transformation    
+    ! in the forwards transformation 
+    
+    t1 = MPI_Wtime()
 #ifdef CUDECOMP
+#ifndef CUDECOMP2
     ! move data to gpu
     spec_d = pt
+#endif
     ! do backward 3d fft on gpu
     call perform_backwards_3dfft_cd(current_state, spec_d, real_d)
     ! move data back to ram
     current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX),start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)) =&
         & real_d(start_loc(Z_INDEX):end_loc(Z_INDEX),start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX))
+    deallocate(real_d, spec_d)
 #else
     call perform_backwards_3dfft(current_state, pt, current_state%p%data(start_loc(Z_INDEX):end_loc(Z_INDEX), &
          start_loc(Y_INDEX):end_loc(Y_INDEX), start_loc(X_INDEX):end_loc(X_INDEX)))   
 #endif
+    tstop = MPI_Wtime()
+    tback = tback + (tstop - t1)
+    nback = nback + 1
+    ttotal = ttotal + (tstop - tstart)
+    ntotal = ntotal + 1
 
 
     ! p filter
@@ -237,11 +301,36 @@ contains
   !! @param current_state The current model state
   subroutine finalisation_callback(current_state)
     type(model_state_type), target, intent(inout) :: current_state
+    real(kind=DEFAULT_PRECISION) :: t_per_fftsolve, t_per_backward, t_per_forward, t_per_trisolve
+    real(kind=DEFAULT_PRECISION) :: total_time
+    integer :: total_steps
+
+    total_time = MPI_Wtime() - t_model_start
 
     call finalise_pencil_fft(current_state%parallel%monc_communicator)
     deallocate(pt)
     if (allocated(cos_x)) deallocate(cos_x)
     if (allocated(cos_y)) deallocate(cos_y)
+    t_per_fftsolve = ttotal / ntotal
+    t_per_trisolve = tsolve / nsolve
+    t_per_forward = tforward / nforward
+    t_per_backward = tback / nback
+#ifdef CUDECOMP
+    call log_master_log(LOG_INFO, "Using GPU for FFT solve and transpose")
+#else
+    call log_master_log(LOG_INFO, "Using CPU for FFT solve and transpose")
+#endif
+#ifdef CUDECOMP2
+    call log_master_log(LOG_INFO, "Using GPU for tridiagonal solve")
+#else
+    call log_master_log(LOG_INFO, "Using CPU for tridiagonal solve")
+#endif
+    call log_master_log(LOG_INFO, "Total time in simulation ="//trim(conv_to_string(total_time))//" s")
+    call log_master_log(LOG_INFO, "Total time in FFT solves ="//trim(conv_to_string(ttotal))//" s")
+    call log_master_log(LOG_INFO, "Time per FFT solve ="//trim(conv_to_string(t_per_fftsolve))//" s")
+    call log_master_log(LOG_INFO, "Time per forward FFT ="//trim(conv_to_string(t_per_forward))//" s")
+    call log_master_log(LOG_INFO, "Time per backward FFT ="//trim(conv_to_string(t_per_backward))//" s")
+    call log_master_log(LOG_INFO, "Time per tridiagonal FFT ="//trim(conv_to_string(t_per_trisolve))//" s")
   end subroutine finalisation_callback
 
   !> Completes the psrce calculation by waiting on all outstanding psrce communications to complete and then combine the
@@ -351,18 +440,15 @@ contains
   !! with Z from 1 to nz, Yhat from 1 to ny, and Xhat from 1 to nx.
   !! Within this subroutine, x and z are sometimes mixed, as Z is contiguous in monc, but 
   !! cuda calls the contiguous dimension X
-  attributes(global) subroutine gpu_solve(pressure_term_d, cos_x_d, cos_y_d, cza_d, czb_d, czg_d, czh_d,&
-                                          & nx, ny, nz, startX, startY)
+  !! cos_x_d, cos_y_d, cza_d, czb_d, czg_d, and czh_d are constant arrays held on the gpu,
+  !! declared and initialised in this module
+  attributes(global) subroutine gpu_solve(pressure_term_d, nx, ny, nz, startX, startY)
     implicit none
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: pressure_term_d
-    real(kind=DEFAULT_PRECISION), dimension(:), intent(in) :: cos_x_d, cos_y_d, cza_d, czg_d, czh_d, czb_d ! predefined arrays
-    
     integer, value :: nx, ny, nz, startX, startY
 
-    ! thread private variables
-    real(kind=DEFAULT_PRECISION) :: b_d(nz), b1_d(nz), s_d(nz), s1_d(nz) ! work arrays
     integer :: i, j, k, j_start
-    real(kind=DEFAULT_PRECISION) :: cij_d
+    real(kind=DEFAULT_PRECISION) :: cij_d, s_prev, s_curr
 
     ! x and z are mixed up a bit, because x is the first index of a cuda array, but that first index
     ! is Z for the monc arrays we are acting on
@@ -373,32 +459,31 @@ contains
       j_start = merge(3, 1, startY == 1 .and.  startX == 1 .and. i .lt. 3)
       if ( j >= j_start .and. j <= ny) then
         cij_d = cos_x_d(i) + cos_y_d(j)
-        b_d(2) = cij_d - cza_d(2)
-        b1_d(2) = 1.0_DEFAULT_PRECISION/b_d(2)
-        s1_d(2) = pressure_term_d(2,j,i)
+        b1_d(2, j, i) = 1.0_DEFAULT_PRECISION/(cij_d - cza_d(2))
+        s1_d(2, j, i) = pressure_term_d(2,j,i)
         do k=3, nz
-          b_d(k) = cij_d+czg_d(k)
-          b1_d(k)=1.0_DEFAULT_PRECISION/(b_d(k)-czh_d(k)*b1_d(k-1))
-          s1_d(k)=pressure_term_d(k,j,i)-czb_d(k)*s1_d(k-1)*b1_d(k-1)
+          b1_d(k, j, i)=1.0_DEFAULT_PRECISION/( (cij_d+czg_d(k)) -czh_d(k)*b1_d(k-1, j, i))
+          s1_d(k, j, i)=pressure_term_d(k,j,i)-czb_d(k)*s1_d(k-1, j, i)*b1_d(k-1, j, i)
         end do
 
-        pressure_term_d( nz, j, i) = s1_d(nz) * b1_d(nz)
+        pressure_term_d( nz, j, i) = s1_d(nz, j, i) * b1_d(nz, j, i)
 
         do k = nz-1, 2, -1
-          pressure_term_d(k, j, i) = (s1_d(k) - cza_d(k)*pressure_term_d(k+1, j, i)) * b1_d(k)
+          pressure_term_d(k, j, i) = (s1_d(k, j, i) - cza_d(k)*pressure_term_d(k+1, j, i)) * b1_d(k, j, i)
         end do
       end if
     end if 
 
     if (startY == 1 .and. startX == 1) then
       if ( (i==1 .or. i==2) .and. (j==1 .or. j==2)) then
-        s_d(2) = pressure_term_d(2,j,i)
+        s_prev = pressure_term_d(2,j,i)
         pressure_term_d(1,j,i) = 0.0_DEFAULT_PRECISION
         pressure_term_d(2,j,i) = 0.0_DEFAULT_PRECISION
         do k=3, nz
-          s_d(k) = pressure_term_d(k, j, i)
-          pressure_term_d(k, j, i) = (s_d(k-1) - czg_d(k-1) * pressure_term_d(k-1, j, i) - &
+          s_curr = pressure_term_d(k, j, i)
+          pressure_term_d(k, j, i) = (s_prev - czg_d(k-1) * pressure_term_d(k-1, j, i) - &
                                      & czb_d(k-1) * pressure_term_d(k-2,j,i)) / cza_d(k-1)
+          s_prev = s_curr
         end do
       end if
     end if
@@ -418,43 +503,19 @@ contains
   !! @param current_state The current model state
   !! @param pressure_term The pressure term in Fourier space
   !! @param fourier_space_sizes The size of the pressure term in each dimension
-  subroutine tridiagonal_solver_g(current_state, pressure_term, fourier_space_sizes)
+  subroutine tridiagonal_solver_g(current_state, pressure_term_d, fourier_space_sizes)
     type(model_state_type), target, intent(inout) :: current_state
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout) :: pressure_term
+    real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout), device :: pressure_term_d
     integer, intent(in) :: fourier_space_sizes(3)
     integer :: i, j, k, j_start, ierrSync, ierrAsync
 
-    real(kind=DEFAULT_PRECISION), dimension(:,:,:), allocatable, device :: pressure_term_d
-    real(kind=DEFAULT_PRECISION), dimension(:), allocatable, device :: cos_x_d, cos_y_d
-    real(kind=DEFAULT_PRECISION), dimension(:), allocatable, device :: cza_d, czg_d, czh_d, czb_d
-
     type(dim3) :: grid, tBlock
 
-    allocate(pressure_term_d(fourier_space_sizes(Z_INDEX), fourier_space_sizes(Y_INDEX), fourier_space_sizes(X_INDEX)))
-    allocate(cos_x_d(fourier_space_sizes(X_INDEX)))
-    allocate(cos_y_d(fourier_space_sizes(Y_INDEX)))
-    allocate(cza_d(fourier_space_sizes(Z_INDEX)))
-    allocate(czb_d(fourier_space_sizes(Z_INDEX)))
-    allocate(czg_d(fourier_space_sizes(Z_INDEX)))
-    allocate(czh_d(fourier_space_sizes(Z_INDEX)))
+    tBlock = dim3(1, 16, 16)
+    grid = dim3(1, (fourier_space_sizes(Y_INDEX)+tBlock%y-1) / tBlock%y, &
+                   (fourier_space_sizes(X_INDEX)+tBlock%z-1) / tBlock%z )
 
-    pressure_term_d(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))= &
-              & pressure_term(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))
-    cos_x_d(1:fourier_space_sizes(X_INDEX)) = cos_x(1:fourier_space_sizes(X_INDEX))
-    cos_y_d(1:fourier_space_sizes(Y_INDEX)) = cos_y(1:fourier_space_sizes(Y_INDEX))
-
-    cza_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%cza(1:fourier_space_sizes(Z_INDEX))
-    czb_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czb(1:fourier_space_sizes(Z_INDEX))
-    czg_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czg(1:fourier_space_sizes(Z_INDEX))
-    czh_d(1:fourier_space_sizes(Z_INDEX)) = current_state%global_grid%configuration%vertical%czh(1:fourier_space_sizes(Z_INDEX))
-
-    tBlock = dim3(1, 4, 4)
-    grid = dim3(1, (fourier_space_sizes(Y_INDEX)+tBlock%y-1) / tBlock%y-1, &
-                   (fourier_space_sizes(X_INDEX)+tBlock%z-1) / tBlock%z-1 )
-
-    
-    call gpu_solve<<<grid, tBlock >>>(pressure_term_d, cos_x_d, cos_y_d, cza_d, czb_d, czg_d, czh_d,&
-                             & fourier_space_sizes(X_INDEX), fourier_space_sizes(Y_INDEX), fourier_space_sizes(Z_INDEX),&
+    call gpu_solve<<<grid, tBlock >>>(pressure_term_d, fourier_space_sizes(X_INDEX), fourier_space_sizes(Y_INDEX), fourier_space_sizes(Z_INDEX),&
                              & current_state%local_grid%start(X_INDEX), current_state%local_grid%start(Y_INDEX))
     ierrSync = cudaGetLastError ()
     ierrAsync = cudaDeviceSynchronize ()
@@ -464,9 +525,6 @@ contains
     if ( ierrAsync /= cudaSuccess ) then
       print *, 'Async kernel error :', trim ( cudaGetErrorString ( ierrAsync ))
     end if
-
-    pressure_term(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))= &
-              & pressure_term_d(1:fourier_space_sizes(Z_INDEX), 1:fourier_space_sizes(Y_INDEX), 1:fourier_space_sizes(X_INDEX))
 
   end subroutine tridiagonal_solver_g
 #endif

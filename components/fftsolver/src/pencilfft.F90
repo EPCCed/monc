@@ -251,7 +251,7 @@ contains
     call log_master_log(LOG_INFO, "Using CPU for FFT")
 #endif
 #ifdef CUDECOMP
-    call log_master_log(LOG_INFO, "Using GPU for Transposes")
+    call log_master_log(LOG_INFO, "Using GPU for Transposes, but not for tridiagonal solve")
 #else
     call log_master_log(LOG_INFO, "Using CPU for Transposes")
 #endif
@@ -427,7 +427,7 @@ contains
   !! Operations: Transpose to Y, Transpose to X, iFFT in X, Transpose to Y, iFFT in Y, transpose to Z
   !! @param current_state The current model state
   !! @param source_data Source data, GPU, in spectral space for Y and X
-  !! @param target_data Output data, CPU, in real space.
+  !! @param target_data Output data, GPU, in real space.
   subroutine perform_backwards_3dfft_cd(current_state, source_data, target_data)
     type(model_state_type), target, intent(inout) :: current_state
     real(kind=DEFAULT_PRECISION), dimension(:,:,:), intent(inout), device :: source_data
@@ -530,6 +530,15 @@ contains
 
     !-- Transpose y to z (use cudecomp y to x because monc z is cudecomp x)
     istat = cudecompTransposeYToX(handle_cudecomp_T1, grid_desc_cudecomp_T1, fft_in_y_buffer_d, target_data, CUDECOMP_WORKSPACE_AUTO, CUDECOMP_DOUBLE)
+
+    deallocate(source_data_d    )
+    deallocate(real_buffer3_d   )
+    deallocate(real_buffer2_d   )
+    deallocate(buffer2_d        )
+    deallocate(fft_in_x_buffer_d)
+    deallocate(real_buffer1_d   )
+    deallocate(buffer1_d        )
+    deallocate(fft_in_y_buffer_d)
 #endif
   end subroutine perform_backwards_3dfft_cd
 
